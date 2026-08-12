@@ -35,6 +35,7 @@ from sqlglot.dialects.dialect import (
     timestrtotime_sql,
     unit_to_str,
     week_unit_to_dow,
+    weekstart_unit_to_str,
     WEEK_START_DAY_TO_DOW,
 )
 from sqlglot.generator import unsupported_args
@@ -160,6 +161,24 @@ def _last_day_sql(self: DuckDBGenerator, expression: exp.LastDay) -> str:
     For other date parts (year, quarter, week), we need to implement equivalent logic.
     """
     date_expr = expression.this
+    unit_expr = expression.args.get("unit")
+
+    week_start = week_unit_to_dow(unit_expr)
+    if week_start:
+        # The week's last day precedes its start day; DuckDB DAYOFWEEK: Sunday=0, ..., Saturday=6
+        last_dow = week_start - 1
+        dow = exp.func("EXTRACT", "DAYOFWEEK", date_expr)
+
+        # Days to the last day of week: (last_dow + 7 - dayofweek) % 7
+        days_to_last_expr = exp.Mod(
+            this=exp.Paren(this=exp.Sub(this=exp.Literal.number(last_dow + 7), expression=dow)),
+            expression=exp.Literal.number(7),
+        )
+        interval_expr = exp.Interval(this=days_to_last_expr, unit=exp.var("DAY"))
+        add_expr = exp.Add(this=date_expr, expression=interval_expr)
+
+        return self.sql(exp.cast(add_expr, exp.DType.DATE))
+
     unit = expression.text("unit")
 
     if not unit or unit.upper() == "MONTH":
@@ -188,20 +207,6 @@ def _last_day_sql(self: DuckDBGenerator, expression: exp.LastDay) -> str:
         # Last day of the last month of the quarter
         last_day_expr = exp.func("LAST_DAY", first_day_last_month_expr)
         return self.sql(last_day_expr)
-
-    if unit.upper() == "WEEK":
-        # DuckDB DAYOFWEEK: Sunday=0, Monday=1, ..., Saturday=6
-        dow = exp.func("EXTRACT", "DAYOFWEEK", date_expr)
-        # Days to the last day of week: (7 - dayofweek) % 7, assuming the last day of week is Sunday (Snowflake)
-        # Wrap in parentheses to ensure correct precedence
-        days_to_sunday_expr = exp.Mod(
-            this=exp.Paren(this=exp.Sub(this=exp.Literal.number(7), expression=dow)),
-            expression=exp.Literal.number(7),
-        )
-        interval_expr = exp.Interval(this=days_to_sunday_expr, unit=exp.var("DAY"))
-        add_expr = exp.Add(this=date_expr, expression=interval_expr)
-        cast_expr = exp.cast(add_expr, exp.DType.DATE)
-        return self.sql(cast_expr)
 
     self.unsupported(f"Unsupported date part '{unit}' in LAST_DAY function")
     return self.function_fallback_sql(expression)
@@ -895,10 +900,18 @@ def _implicit_datetime_cast(
     return arg
 
 
+def _week_trunc_start_dow(unit: exp.Expr | None) -> int | None:
+    # DuckDB's weeks are ISO 8601, so ISOWEEK maps to its plain WEEK unit
+    if isinstance(unit, exp.Literal) and unit.name.upper() == "ISOWEEK":
+        return 1
+    return week_unit_to_dow(unit)
+
+
 def _build_week_trunc_expression(
     date_expr: exp.Expr,
     start_dow: int,
     preserve_start_day: bool = False,
+    cast_to_date: bool = True,
 ) -> exp.Expr:
     """
     Build DATE_TRUNC expression for week boundaries with custom start day.
@@ -912,6 +925,8 @@ def _build_week_trunc_expression(
         preserve_start_day: If True, reverse the shift after truncating so the result lands on the
             correct week start day. Needed for DATE_TRUNC (absolute result matters) but
             not for DATE_DIFF (only relative alignment matters).
+        cast_to_date: If True, cast the shifted result back to DATE; set to False for
+            timestamp-valued inputs, where the result must remain a timestamp.
 
     Shift formula: Sunday (7) gets +1, others get (1 - start_dow).
     """
@@ -927,9 +942,10 @@ def _build_week_trunc_expression(
 
     if preserve_start_day:
         interval = exp.Interval(this=exp.Literal.string(str(-shift_days)), unit=exp.var("DAY"))
-        return exp.cast(
-            exp.DateAdd(this=truncated, expression=interval), to=exp.DType.DATE, copy=False
-        )
+        shifted_back: exp.Expr = exp.DateAdd(this=truncated, expression=interval)
+        if cast_to_date:
+            return exp.cast(shifted_back, to=exp.DType.DATE, copy=False)
+        return shifted_back
 
     return truncated
 
@@ -1774,9 +1790,6 @@ class DuckDBGenerator(generator.Generator):
         exp.UnixToStr: lambda self, e: self.func(
             "STRFTIME", self.func("TO_TIMESTAMP", e.this), self.format_time(e)
         ),
-        exp.DatetimeTrunc: lambda self, e: self.func(
-            "DATE_TRUNC", unit_to_str(e), exp.cast(e.this, exp.DType.DATETIME)
-        ),
         exp.UnixToTime: _unix_to_time_sql,
         exp.UnixToTimeStr: lambda self, e: f"CAST(TO_TIMESTAMP({self.sql(e, 'this')}) AS TEXT)",
         exp.VariancePop: rename_func("VAR_POP"),
@@ -1938,7 +1951,7 @@ class DuckDBGenerator(generator.Generator):
     IGNORE_RESPECT_NULLS_WINDOW_FUNCTIONS: t.ClassVar = _IGNORE_RESPECT_NULLS_WINDOW_FUNCTIONS
 
     # Template for ZIPF transpilation - placeholders get replaced with actual parameters
-    ZIPF_TEMPLATE: exp.Expr = exp.maybe_parse(
+    ZIPF_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         WITH rand AS (SELECT :random_expr AS r),
         weights AS (
@@ -1957,22 +1970,24 @@ class DuckDBGenerator(generator.Generator):
 
     # Template for NORMAL transpilation using Box-Muller transform
     # mean + (stddev * sqrt(-2 * ln(u1)) * cos(2 * pi * u2))
-    NORMAL_TEMPLATE: exp.Expr = exp.maybe_parse(
+    NORMAL_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         ":mean + (:stddev * SQRT(-2 * LN(GREATEST(:u1, 1e-10))) * COS(2 * PI() * :u2))"
     )
 
     # Template for generating a seeded pseudo-random value in [0, 1) from a hash
-    SEEDED_RANDOM_TEMPLATE: exp.Expr = exp.maybe_parse("(ABS(HASH(:seed)) % 1000000) / 1000000.0")
+    SEEDED_RANDOM_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
+        "(ABS(HASH(:seed)) % 1000000) / 1000000.0"
+    )
 
     # Template for generating signed and unsigned SEQ values within a specified range
-    SEQ_UNSIGNED: exp.Expr = _SEQ_UNSIGNED
-    SEQ_SIGNED: exp.Expr = _SEQ_SIGNED
+    SEQ_UNSIGNED: t.ClassVar[exp.Expr] = _SEQ_UNSIGNED
+    SEQ_SIGNED: t.ClassVar[exp.Expr] = _SEQ_SIGNED
 
     # Template for MAP_CAT transpilation - Snowflake semantics:
     # 1. Returns NULL if either input is NULL
     # 2. For duplicate keys, prefers non-NULL value (COALESCE(m2[k], m1[k]))
     # 3. Filters out entries with NULL values from the result
-    MAPCAT_TEMPLATE: exp.Expr = exp.maybe_parse(
+    MAPCAT_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE
             WHEN :map1 IS NULL OR :map2 IS NULL THEN NULL
@@ -1986,7 +2001,7 @@ class DuckDBGenerator(generator.Generator):
 
     # Mappings for EXTRACT/DATE_PART transpilation
     # Maps Snowflake specifiers unsupported in DuckDB to strftime format codes
-    EXTRACT_STRFTIME_MAPPINGS: dict[str, tuple[str, str]] = {
+    EXTRACT_STRFTIME_MAPPINGS: t.ClassVar[dict[str, tuple[str, str]]] = {
         "WEEKISO": ("%V", "INTEGER"),
         "YEAROFWEEK": ("%G", "INTEGER"),
         "YEAROFWEEKISO": ("%G", "INTEGER"),
@@ -1994,7 +2009,7 @@ class DuckDBGenerator(generator.Generator):
     }
 
     # Maps epoch-based specifiers to DuckDB epoch functions
-    EXTRACT_EPOCH_MAPPINGS: dict[str, str] = {
+    EXTRACT_EPOCH_MAPPINGS: t.ClassVar[dict[str, str]] = {
         "EPOCH_SECOND": "EPOCH",
         "EPOCH_MILLISECOND": "EPOCH_MS",
         "EPOCH_MICROSECOND": "EPOCH_US",
@@ -2044,7 +2059,7 @@ class DuckDBGenerator(generator.Generator):
     #   - Large format: Fixed 10-byte header + values (no padding needed)
     #   Result: Complete binary bitmap as BLOB
     #
-    BITMAP_CONSTRUCT_AGG_TEMPLATE: exp.Expr = exp.maybe_parse(
+    BITMAP_CONSTRUCT_AGG_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         SELECT CASE
             WHEN l IS NULL OR LENGTH(l) = 0 THEN NULL
@@ -2063,7 +2078,7 @@ class DuckDBGenerator(generator.Generator):
     )
 
     # Template for RANDSTR transpilation - placeholders get replaced with actual parameters
-    RANDSTR_TEMPLATE: exp.Expr = exp.maybe_parse(
+    RANDSTR_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         f"""
         SELECT LISTAGG(
             SUBSTRING(
@@ -2083,7 +2098,7 @@ class DuckDBGenerator(generator.Generator):
     # Template for MINHASH transpilation
     # Computes k minimum hash values across aggregated data using DuckDB list functions
     # Returns JSON matching Snowflake format: {"state": [...], "type": "minhash", "version": 1}
-    MINHASH_TEMPLATE: exp.Expr = exp.maybe_parse(
+    MINHASH_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         SELECT JSON_OBJECT('state', LIST(min_h ORDER BY seed), 'type', 'minhash', 'version', 1)
         FROM (
@@ -2095,7 +2110,7 @@ class DuckDBGenerator(generator.Generator):
 
     # Template for MINHASH_COMBINE transpilation
     # Combines multiple minhash signatures by taking element-wise minimum
-    MINHASH_COMBINE_TEMPLATE: exp.Expr = exp.maybe_parse(
+    MINHASH_COMBINE_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         SELECT JSON_OBJECT('state', LIST(min_h ORDER BY idx), 'type', 'minhash', 'version', 1)
         FROM (
@@ -2112,7 +2127,7 @@ class DuckDBGenerator(generator.Generator):
 
     # Template for APPROXIMATE_SIMILARITY transpilation
     # Computes multi-way Jaccard similarity: fraction of positions where ALL signatures agree
-    APPROXIMATE_SIMILARITY_TEMPLATE: exp.Expr = exp.maybe_parse(
+    APPROXIMATE_SIMILARITY_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         SELECT CAST(SUM(CASE WHEN num_distinct = 1 THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(*)
         FROM (
@@ -2130,7 +2145,7 @@ class DuckDBGenerator(generator.Generator):
     # Template for ARRAYS_ZIP transpilation
     # Snowflake pads to longest array; DuckDB LIST_ZIP truncates to shortest
     # Uses RANGE + indexing to match Snowflake behavior
-    ARRAYS_ZIP_TEMPLATE: exp.Expr = exp.maybe_parse(
+    ARRAYS_ZIP_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE WHEN :null_check THEN NULL
         WHEN :all_empty_check THEN [:empty_struct]
@@ -2139,7 +2154,7 @@ class DuckDBGenerator(generator.Generator):
         """,
     )
 
-    UUID_V5_TEMPLATE: exp.Expr = exp.maybe_parse(
+    UUID_V5_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         (SELECT
             LOWER(
@@ -2163,7 +2178,7 @@ class DuckDBGenerator(generator.Generator):
     #   INTERSECTION (<=): keep the N-th occurrence only if N <= count in arr2
     #                      e.g. [2,2,2] INTERSECT [2,2] -> [2,2]
     # IS NOT DISTINCT FROM is used for NULL-safe element comparison.
-    ARRAY_BAG_TEMPLATE: exp.Expr = exp.maybe_parse(
+    ARRAY_BAG_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE
             WHEN :arr1 IS NULL OR :arr2 IS NULL THEN NULL
@@ -2178,12 +2193,12 @@ class DuckDBGenerator(generator.Generator):
         """
     )
 
-    ARRAY_EXCEPT_CONDITION: exp.Expr = exp.maybe_parse(
+    ARRAY_EXCEPT_CONDITION: t.ClassVar[exp.Expr] = exp.maybe_parse(
         "LEN(LIST_FILTER(:arr1[1:pair[1]], e -> e IS NOT DISTINCT FROM pair[0]))"
         " > LEN(LIST_FILTER(:arr2, e -> e IS NOT DISTINCT FROM pair[0]))"
     )
 
-    ARRAY_INTERSECTION_CONDITION: exp.Expr = exp.maybe_parse(
+    ARRAY_INTERSECTION_CONDITION: t.ClassVar[exp.Expr] = exp.maybe_parse(
         "LEN(LIST_FILTER(:arr1[1:pair[1]], e -> e IS NOT DISTINCT FROM pair[0]))"
         " <= LEN(LIST_FILTER(:arr2, e -> e IS NOT DISTINCT FROM pair[0]))"
     )
@@ -2192,7 +2207,7 @@ class DuckDBGenerator(generator.Generator):
     # filters out any element that appears at least once in arr2.
     #   e.g. [1,1,2,3] EXCEPT [1] -> [2,3]
     # IS NOT DISTINCT FROM is used for NULL-safe element comparison.
-    ARRAY_EXCEPT_SET_TEMPLATE: exp.Expr = exp.maybe_parse(
+    ARRAY_EXCEPT_SET_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE
             WHEN :arr1 IS NULL OR :arr2 IS NULL THEN NULL
@@ -2212,7 +2227,7 @@ class DuckDBGenerator(generator.Generator):
     #   1 IN UNNEST([])         -> FALSE
     # The default `IN (SELECT UNNEST(...))` rewrite creates a correlated subquery
     # that DuckDB rejects inside non-inner joins, so a CASE expression is used instead.
-    IN_UNNEST_TEMPLATE: exp.Expr = exp.maybe_parse(
+    IN_UNNEST_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE
             WHEN :arr IS NULL OR ARRAY_LENGTH(:arr) = 0 THEN FALSE
@@ -2223,7 +2238,7 @@ class DuckDBGenerator(generator.Generator):
         """
     )
 
-    STRTOK_TO_ARRAY_TEMPLATE: exp.Expr = exp.maybe_parse(
+    STRTOK_TO_ARRAY_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE WHEN :delimiter IS NULL THEN NULL
         ELSE LIST_FILTER(
@@ -2272,7 +2287,7 @@ class DuckDBGenerator(generator.Generator):
     #         x -> NOT x = ''
     #     )[index]
     # END
-    STRTOK_TEMPLATE: exp.Expr = exp.maybe_parse(
+    STRTOK_TEMPLATE: t.ClassVar[exp.Expr] = exp.maybe_parse(
         """
         CASE
             WHEN :delimiter = '' AND :string = '' THEN NULL
@@ -4413,7 +4428,7 @@ class DuckDBGenerator(generator.Generator):
         unit = expression.args.get("unit")
         date = expression.this
 
-        week_start = week_unit_to_dow(unit)
+        week_start = _week_trunc_start_dow(unit)
         unit = unit_to_str(expression)
 
         if week_start:
@@ -4432,11 +4447,33 @@ class DuckDBGenerator(generator.Generator):
 
         return result
 
+    def datetimetrunc_sql(self, expression: exp.DatetimeTrunc) -> str:
+        this = exp.cast(expression.this, exp.DType.DATETIME)
+        week_start = _week_trunc_start_dow(expression.args.get("unit"))
+        if week_start:
+            return self.sql(
+                _build_week_trunc_expression(
+                    this, week_start, preserve_start_day=True, cast_to_date=False
+                )
+            )
+
+        return self.func("DATE_TRUNC", unit_to_str(expression), this)
+
     def timestamptrunc_sql(self, expression: exp.TimestampTrunc) -> str:
-        unit = unit_to_str(expression)
         zone = expression.args.get("zone")
         timestamp = expression.this
-        date_unit = is_date_unit(unit)
+        week_start = _week_trunc_start_dow(expression.args.get("unit"))
+
+        # The week start emulation below is exact, so avoid weekstart_unit_to_str's degrade warning
+        unit = unit_to_str(expression) if week_start else weekstart_unit_to_str(self, expression)
+        date_unit = is_date_unit(unit) or bool(week_start)
+
+        def _trunc_expr(this: exp.Expr) -> exp.Expr:
+            if week_start:
+                return _build_week_trunc_expression(
+                    this, week_start, preserve_start_day=True, cast_to_date=False
+                )
+            return exp.func("DATE_TRUNC", unit, this)
 
         if date_unit and zone:
             # BigQuery's TIMESTAMP_TRUNC with timezone truncates in the target timezone and returns as UTC.
@@ -4444,10 +4481,13 @@ class DuckDBGenerator(generator.Generator):
             # 1. First AT TIME ZONE: ensures truncation happens in the target timezone
             # 2. Second AT TIME ZONE: converts the DATE result back to TIMESTAMPTZ (preserving time component)
             timestamp = exp.AtTimeZone(this=timestamp, zone=zone)
-            result_sql = self.func("DATE_TRUNC", unit, timestamp)
-            return self.sql(exp.AtTimeZone(this=result_sql, zone=zone))
+            trunced = _trunc_expr(timestamp)
+            if isinstance(trunced, exp.DateAdd):
+                # Parenthesize so the trailing AT TIME ZONE binds to the whole shifted expression
+                trunced = exp.Paren(this=trunced)
+            return self.sql(exp.AtTimeZone(this=trunced, zone=zone))
 
-        result = self.func("DATE_TRUNC", unit, timestamp)
+        result = self.sql(_trunc_expr(timestamp))
         if expression.args.get("input_type_preserved"):
             if timestamp.type and timestamp.is_type(exp.DType.TIME, exp.DType.TIMETZ):
                 dummy_date = exp.Cast(

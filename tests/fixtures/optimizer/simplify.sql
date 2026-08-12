@@ -13,6 +13,15 @@ NOT x AND x;
 x OR NOT x;
 NOT x OR x;
 
+-- unlike a bare column, a predicate known to be non-null is eliminated by its complement
+# dialect: postgres
+'abc' ~ 'a' AND NOT 'abc' ~ 'a';
+FALSE;
+
+# dialect: postgres
+'abc' ~ 'a' OR NOT 'abc' ~ 'a';
+TRUE;
+
 1 AND TRUE;
 TRUE;
 
@@ -81,6 +90,16 @@ TRUE;
 
 NOT NULL;
 NULL AND TRUE;
+
+-- the NULL-condition rewrite must be parenthesized under NOT or a different connector
+NOT NOT NULL;
+NULL AND TRUE;
+
+x = 1 OR NOT NOT NULL;
+NULL OR x = 1;
+
+x = 1 AND NOT NOT NULL;
+NULL AND x = 1;
 
 NULL = NULL;
 NULL = NULL;
@@ -435,8 +454,78 @@ SELECT -(x.a > x.b) FROM x;
 SELECT (-((x.a) IS NULL)) FROM x;
 SELECT -(x.a IS NULL) FROM x;
 
+-- like unary minus, `~` binds tighter than a predicate, so its parens must be kept
+# dialect: postgres
+~(a = b);
+~(a = b);
+
+# dialect: postgres
+~(a LIKE b);
+~(a LIKE b);
+
+# dialect: postgres
+~(a @> b);
+~(a @> b);
+
 SELECT * FROM A WHERE a - (b < c) < 0 AND a + (b > c) >= 0;
 SELECT * FROM A WHERE a + (b > c) >= 0 AND a - (b < c) < 0;
+
+# dialect: postgres
+NOT (a @> b);
+NOT a @> b;
+
+# dialect: postgres
+NOT (a <@ b);
+NOT a <@ b;
+
+# dialect: postgres
+NOT (a && b);
+NOT a && b;
+
+# dialect: postgres
+(j ? 'a') AND id = 1;
+j ? 'a' AND id = 1;
+
+# dialect: postgres
+(j ?& ARRAY['a']) AND id = 1;
+j ?& ARRAY['a'] AND id = 1;
+
+# dialect: postgres
+(j ?| ARRAY['a']) AND id = 1;
+j ?| ARRAY['a'] AND id = 1;
+
+# dialect: postgres
+NOT (s ~ 'a');
+NOT s ~ 'a';
+
+# dialect: postgres
+NOT (s ~* 'a');
+NOT s ~* 'a';
+
+# dialect: postgres
+(r1 -|- r2) AND id = 1;
+r1 -|- r2 AND id = 1;
+
+# dialect: postgres
+(r1 &< r2) AND id = 1;
+r1 &< r2 AND id = 1;
+
+# dialect: postgres
+(r1 &> r2) AND id = 1;
+r1 &> r2 AND id = 1;
+
+-- a predicate parent keeps the parens
+# dialect: postgres
+(a @> b) = (c @> d);
+(a @> b) = (c @> d);
+
+# dialect: duckdb
+NOT (REGEXP_MATCHES(s, 'a'));
+NOT REGEXP_MATCHES(s, 'a');
+
+# dialect: spark
+NOT (s RLIKE 'a');
+NOT s RLIKE 'a';
 
 
 --------------------------------------
@@ -1118,6 +1207,36 @@ x < CAST('2008-11-16' AS DATE) AND x >= CAST('2008-11-09' AS DATE);
 # dialect: bigquery
 DATE_TRUNC(x, WEEK) <> CAST('2008-11-09' AS DATE);
 x < CAST('2008-11-09' AS DATE) OR x >= CAST('2008-11-16' AS DATE);
+
+# dialect: bigquery
+DATE_TRUNC(x, WEEK) IN (CAST('2008-11-09' AS DATE), CAST('2008-11-23' AS DATE));
+(x < CAST('2008-11-16' AS DATE) AND x >= CAST('2008-11-09' AS DATE)) OR (x < CAST('2008-11-30' AS DATE) AND x >= CAST('2008-11-23' AS DATE));
+
+-- A week start that doesn't match the dialect's week offset must not be simplified
+# dialect: bigquery
+DATE_TRUNC(CAST('2023-12-15' AS DATE), WEEK(MONDAY));
+DATE_TRUNC(CAST('2023-12-15' AS DATE), WEEK(MONDAY));
+
+# dialect: bigquery
+DATE_TRUNC(x, WEEK(MONDAY)) = CAST('2008-11-10' AS DATE);
+DATE_TRUNC(x, WEEK(MONDAY)) = CAST('2008-11-10' AS DATE);
+
+-- T-SQL week truncation follows @@DATEFIRST, which defaults to 7 (Sunday)
+# dialect: tsql
+DATETRUNC(WEEK, CAST('2021-12-08' AS DATETIME2));
+CAST('2021-12-05 00:00:00' AS DATETIME2);
+
+# dialect: tsql
+DATETRUNC(WEEK, CAST('2023-12-10' AS DATE));
+CAST('2023-12-10' AS DATE);
+
+# dialect: tsql
+DATETRUNC(WEEK, x) = CAST('2023-12-10' AS DATE);
+x < CAST('2023-12-17' AS DATE) AND x >= CAST('2023-12-10' AS DATE);
+
+# dialect: tsql
+DATETRUNC(WEEK, x) > CAST('2023-12-10' AS DATE);
+x >= CAST('2023-12-17' AS DATE);
 
 DATE_TRUNC('year', x) = CAST('2021-01-01' AS DATE);
 x < CAST('2022-01-01' AS DATE) AND x >= CAST('2021-01-01' AS DATE);

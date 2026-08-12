@@ -4,6 +4,7 @@ import logging
 import re
 import typing as t
 from collections import defaultdict
+from decimal import Decimal
 from functools import reduce, wraps
 
 from sqlglot import exp
@@ -460,6 +461,9 @@ class Generator:
     # Whether UNPIVOT aliases are Identifiers (False means they're Literals)
     UNPIVOT_ALIASES_ARE_IDENTIFIERS = True
 
+    # Whether a (UN)PIVOT's alias is introduced with AS (Oracle rejects it, ORA-03048)
+    PIVOT_ALIAS_WITH_AS = True
+
     # What delimiter to use for separating JSON key/value pairs
     JSON_KEY_VALUE_PAIR_SEP = ":"
 
@@ -480,6 +484,12 @@ class Generator:
 
     # Whether ALTER TABLE ... CHANGE COLUMN column-rename-and-redefine syntax is supported
     SUPPORTS_CHANGE_COLUMN = False
+
+    # Whether ALTER COLUMN can set a column's nullability together with its type
+    SUPPORTS_ALTER_COLUMN_NULLABILITY = False
+
+    # Whether ALTER COLUMN IF EXISTS is supported
+    SUPPORTS_ALTER_COLUMN_IF_EXISTS = False
 
     # Whether the LikeProperty needs to be specified inside of the schema clause
     LIKE_PROPERTY_INSIDE_SCHEMA = False
@@ -1639,10 +1649,11 @@ class Generator:
     def unicodestring_sql(self, expression: exp.UnicodeString) -> str:
         this = self.sql(expression, "this")
         escape = expression.args.get("escape")
+        unicode_start = self.dialect.UNICODE_START
 
-        if self.dialect.UNICODE_START:
+        if unicode_start:
             escape_substitute = r"\\\1"
-            left_quote, right_quote = self.dialect.UNICODE_START, self.dialect.UNICODE_END
+            left_quote, right_quote = unicode_start, self.dialect.UNICODE_END or ""
         else:
             escape_substitute = r"\\u\1"
             left_quote, right_quote = self.dialect.QUOTE_START, self.dialect.QUOTE_END
@@ -1654,8 +1665,15 @@ class Generator:
             escape_pattern = ESCAPED_UNICODE_RE
             escape_sql = ""
 
-        if not self.dialect.UNICODE_START or (escape and not self.SUPPORTS_UESCAPE):
+        if not unicode_start or (escape and not self.SUPPORTS_UESCAPE):
             this = escape_pattern.sub(self.UNICODE_SUBSTITUTE or escape_substitute, this)
+
+        if unicode_start:
+            # A Unicode literal only escapes its delimiter by doubling it; the escape character
+            # introduces a code point, so the dialect's ordinary string escapes don't apply here
+            this = self._replace_line_breaks(this).replace(right_quote, right_quote * 2)
+        else:
+            this = self.escape_str(this, escape_backslash=False)
 
         return f"{left_quote}{this}{right_quote}{escape_sql}"
 
@@ -1699,11 +1717,12 @@ class Generator:
                 continue
 
             param_value = param.this if isinstance(param, exp.DataTypeParam) else param
-            if (
-                isinstance(param_value, exp.Literal)
-                and param_value.is_number
-                and int(param_value.to_py()) > bound
-            ):
+            value = (
+                param_value.to_py()
+                if isinstance(param_value, exp.Literal) and param_value.is_number
+                else None
+            )
+            if isinstance(value, (int, Decimal)) and value > bound:
                 self.unsupported(
                     f"{type_value.value} parameter {param_value.name} exceeds "
                     f"{self.dialect.__class__.__name__}'s maximum of {bound}; capping"
@@ -2283,6 +2302,8 @@ class Generator:
         exists = " IF EXISTS" if expression.args.get("exists") else ""
         where = self.sql(expression, "where")
         where = f"{self.sep()}REPLACE WHERE {where}" if where else ""
+        using = self.expressions(expression, key="using", flat=True)
+        using = f"{self.sep()}REPLACE USING ({using})" if using else ""
         expression_sql = f"{self.sep()}{self.sql(expression, 'expression')}"
         on_conflict = self.sql(expression, "conflict")
         on_conflict = f" {on_conflict}" if on_conflict else ""
@@ -2303,7 +2324,7 @@ class Generator:
         source = self.sql(expression, "source")
         source = f"TABLE {source}" if source else ""
 
-        sql = f"INSERT{hint}{alternative}{ignore}{this}{stored}{by_name}{exists}{partition_by}{settings}{where}{expression_sql}{source}"
+        sql = f"INSERT{hint}{alternative}{ignore}{this}{stored}{by_name}{exists}{partition_by}{settings}{where}{using}{expression_sql}{source}"
         return self.prepend_ctes(expression, sql)
 
     def introducer_sql(self, expression: exp.Introducer) -> str:
@@ -2597,7 +2618,8 @@ class Generator:
                 expression.fields[0].set("expressions", new_field_exprs)
 
         alias = self.sql(expression, "alias")
-        alias = f" AS {alias}" if alias else ""
+        if alias:
+            alias = f" AS {alias}" if self.PIVOT_ALIAS_WITH_AS else f" {alias}"
 
         fields = self.expressions(
             expression,
@@ -3627,7 +3649,12 @@ class Generator:
             if self.NORMALIZE_EXTRACT_DATE_PARTS
             else expression.this
         )
-        this_sql = self.sql(this) if self.EXTRACT_ALLOWS_QUOTES else this.name
+        if self.EXTRACT_ALLOWS_QUOTES:
+            this_sql = self.sql(this)
+        elif isinstance(this, exp.WeekStart):
+            this_sql = self.weekstart_name(this)
+        else:
+            this_sql = this.name
         expression_sql = self.sql(expression, "expression")
 
         return f"EXTRACT({this_sql} FROM {expression_sql})"
@@ -4187,6 +4214,13 @@ class Generator:
     def altercolumn_sql(self, expression: exp.AlterColumn) -> str:
         this = self.sql(expression, "this")
 
+        exists = ""
+        if expression.args.get("exists"):
+            if self.SUPPORTS_ALTER_COLUMN_IF_EXISTS:
+                exists = " IF EXISTS"
+            else:
+                self.unsupported("ALTER COLUMN IF EXISTS is not supported by this dialect")
+
         dtype = self.sql(expression, "dtype")
         if dtype:
             collate = self.sql(expression, "collate")
@@ -4194,19 +4228,24 @@ class Generator:
             using = self.sql(expression, "using")
             using = f" USING {using}" if using else ""
             alter_set_type = self.ALTER_SET_TYPE + " " if self.ALTER_SET_TYPE else ""
-            return f"ALTER COLUMN {this} {alter_set_type}{dtype}{collate}{using}"
+            null_constraint = self._alter_column_null_constraint_sql(expression)
+
+            return (
+                f"ALTER COLUMN{exists} {this} {alter_set_type}{dtype}"
+                f"{collate}{using}{null_constraint}"
+            )
 
         default = self.sql(expression, "default")
         if default:
-            return f"ALTER COLUMN {this} SET DEFAULT {default}"
+            return f"ALTER COLUMN{exists} {this} SET DEFAULT {default}"
 
         comment = self.sql(expression, "comment")
         if comment:
-            return f"ALTER COLUMN {this} COMMENT {comment}"
+            return f"ALTER COLUMN{exists} {this} COMMENT {comment}"
 
         visible = expression.args.get("visible")
         if visible:
-            return f"ALTER COLUMN {this} SET {visible}"
+            return f"ALTER COLUMN{exists} {this} SET {visible}"
 
         allow_null = expression.args.get("allow_null")
         drop = expression.args.get("drop")
@@ -4216,9 +4255,20 @@ class Generator:
 
         if allow_null is not None:
             keyword = "DROP" if drop else "SET"
-            return f"ALTER COLUMN {this} {keyword} NOT NULL"
+            return f"ALTER COLUMN{exists} {this} {keyword} NOT NULL"
 
-        return f"ALTER COLUMN {this} DROP DEFAULT"
+        return f"ALTER COLUMN{exists} {this} DROP DEFAULT"
+
+    def _alter_column_null_constraint_sql(self, expression: exp.AlterColumn) -> str:
+        allow_null = expression.args.get("allow_null")
+        if allow_null is None:
+            return ""
+
+        if not self.SUPPORTS_ALTER_COLUMN_NULLABILITY:
+            self.unsupported("ALTER COLUMN cannot set nullability along with a type")
+            return ""
+
+        return " NULL" if allow_null else " NOT NULL"
 
     def modifycolumn_sql(self, expression: exp.ModifyColumn) -> str:
         this = self.sql(expression, "this")
@@ -5179,8 +5229,8 @@ class Generator:
         if self.LAST_DAY_SUPPORTS_DATE_PART:
             return self.function_fallback_sql(expression)
 
-        unit = expression.text("unit")
-        if unit and unit != "MONTH":
+        unit = expression.args.get("unit")
+        if unit and unit.name.upper() != "MONTH":
             self.unsupported("Date parts are not supported in LAST_DAY.")
 
         return self.func("LAST_DAY", expression.this)
@@ -6213,13 +6263,30 @@ class Generator:
         this = expression.this
         return self.func("LOCALTIMESTAMP", this) if this else "LOCALTIMESTAMP"
 
-    def weekstart_sql(self, expression: exp.WeekStart) -> str:
-        this = expression.this.name.upper()
-        if self.dialect.WEEK_OFFSET == -1 and this == "SUNDAY":
-            # BigQuery specific optimization since WEEK(SUNDAY) == WEEK
-            return "WEEK"
+    def weekstart_name(self, expression: exp.WeekStart) -> str:
+        import sqlglot.dialects.dialect
 
-        return self.func("WEEK", expression.this)
+        # WEEK(<day>) is BigQuery-only syntax, so it degrades to the plain WEEK unit
+        this = expression.this.name.upper()
+
+        dow_from_week_start_day = sqlglot.dialects.dialect.WEEK_START_DAY_TO_DOW.get(this)
+        dow_from_week_offset = sqlglot.dialects.dialect.week_offset_to_dow(self.dialect.WEEK_OFFSET)
+
+        if dow_from_week_start_day != dow_from_week_offset:
+            self.unsupported(
+                f"WEEK({this}) is not supported; falling back to the default week start day"
+            )
+
+        return "WEEK"
+
+    def weekstart_sql(self, expression: exp.WeekStart) -> str:
+        name = self.weekstart_name(expression)
+
+        # DateTrunc stores string literal units, whereas TimeUnit expressions store keywords
+        if isinstance(expression.parent, exp.DateTrunc):
+            return self.sql(exp.Literal.string(name))
+
+        return name
 
     def chr_sql(self, expression: exp.Chr, name: str = "CHR") -> str:
         this = self.expressions(expression)
@@ -6229,7 +6296,8 @@ class Generator:
 
     def block_sql(self, expression: exp.Block) -> str:
         expressions = self.expressions(expression, sep="; ", flat=True)
-        return f"{expressions}" if expressions else ""
+        begin = "BEGIN " if expression.args.get("begin") else ""
+        return f"{begin}{expressions}" if expressions else ""
 
     def functionspecification_sql(self, expression: exp.FunctionSpecification) -> str:
         self.unsupported("Unsupported Inline UDFs syntax")
@@ -6241,6 +6309,10 @@ class Generator:
 
     def ifblock_sql(self, expression: exp.IfBlock) -> str:
         self.unsupported("Unsupported If block syntax")
+        return ""
+
+    def casestatement_sql(self, expression: exp.CaseStatement) -> str:
+        self.unsupported("Unsupported Case statement syntax")
         return ""
 
     def whileblock_sql(self, expression: exp.WhileBlock) -> str:

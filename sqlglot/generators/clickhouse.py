@@ -17,7 +17,7 @@ from sqlglot.dialects.dialect import (
     sha256_sql,
     strposition_sql,
     var_map_sql,
-    unit_to_str,
+    weekstart_unit_to_str,
     unit_to_var,
     trim_sql,
     sha2_digest_sql,
@@ -175,6 +175,7 @@ class ClickHouseGenerator(generator.Generator):
     STRUCT_DELIMITER = ("(", ")")
     NVL2_SUPPORTED = False
     ALTER_SET_TYPE = "TYPE"
+    SUPPORTS_ALTER_COLUMN_IF_EXISTS = True
     TABLESAMPLE_REQUIRES_PARENS = False
     TABLESAMPLE_SIZE_IS_ROWS = False
     TABLESAMPLE_KEYWORDS = "SAMPLE"
@@ -398,7 +399,7 @@ class ClickHouseGenerator(generator.Generator):
 
     # There's no list in docs, but it can be found in Clickhouse code
     # see `ClickHouse/src/Parsers/ParserCreate*.cpp`
-    ON_CLUSTER_TARGETS = {
+    ON_CLUSTER_TARGETS: t.ClassVar = {
         "SCHEMA",  # Transpiled CREATE SCHEMA may have OnCluster property set
         "DATABASE",
         "TABLE",
@@ -410,7 +411,7 @@ class ClickHouseGenerator(generator.Generator):
     }
 
     # https://clickhouse.com/docs/en/sql-reference/data-types/nullable
-    NON_NULLABLE_TYPES = {
+    NON_NULLABLE_TYPES: t.ClassVar = {
         exp.DType.ARRAY,
         exp.DType.MAP,
         exp.DType.STRUCT,
@@ -711,7 +712,7 @@ class ClickHouseGenerator(generator.Generator):
         return super().values_sql(expression, values_as_table=values_as_table)
 
     def timestamptrunc_sql(self, expression: exp.DateTrunc | exp.TimestampTrunc) -> str:
-        unit = unit_to_str(expression)
+        unit = weekstart_unit_to_str(self, expression)
         # https://clickhouse.com/docs/whats-new/changelog/2023#improvement
         if self.dialect.version < (23, 12) and unit and unit.is_string:
             unit = exp.Literal.string(unit.name.lower())

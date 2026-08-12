@@ -154,7 +154,8 @@ def simplify_parens(expression: exp.Expr, dialect: DialectType) -> exp.Expr:
     if isinstance(this, exp.Predicate) and (
         not (
             parent_is_predicate
-            or isinstance(parent, exp.Neg)
+            # unary operators that bind tighter than the predicate, unlike NOT
+            or isinstance(parent, (exp.Neg, exp.BitwiseNot))
             or (isinstance(parent, exp.Binary) and not isinstance(parent, exp.Connector))
         )
     ):
@@ -513,6 +514,17 @@ def datetime_floor(d: date, unit: str, dialect: Dialect) -> date:
     return result
 
 
+def _trunc_unit(unit: exp.Expr, dialect: Dialect) -> str:
+    if isinstance(unit, exp.WeekStart):
+        from sqlglot.dialects.dialect import WEEK_START_DAY_TO_DOW, week_offset_to_dow
+
+        if WEEK_START_DAY_TO_DOW.get(unit.name.upper()) != week_offset_to_dow(dialect.WEEK_OFFSET):
+            raise UnsupportedUnit(f"Unsupported unit: {unit}")
+        return "week"
+
+    return unit.name.lower()
+
+
 def date_ceil(d: date, unit: str, dialect: Dialect) -> date:
     floor = datetime_floor(d, unit, dialect)
 
@@ -800,7 +812,9 @@ class Simplifier:
         if isinstance(expression, exp.Not):
             this = expression.this
             if is_null(this):
-                return exp.and_(exp.null(), exp.true(), copy=False)
+                return _parenthesize_nested_connector(
+                    exp.and_(exp.null(), exp.true(), copy=False), expression.parent
+                )
             if this.__class__ in self.COMPLEMENT_COMPARISONS:
                 right = this.expression
                 complement_subquery_predicate = self.COMPLEMENT_SUBQUERY_PREDICATES.get(
@@ -831,7 +845,9 @@ class Simplifier:
                         copy=False,
                     )
                 if is_null(condition):
-                    return exp.and_(exp.null(), exp.true(), copy=False)
+                    return _parenthesize_nested_connector(
+                        exp.and_(exp.null(), exp.true(), copy=False), expression.parent
+                    )
             if always_true(this):
                 return exp.false()
             if is_false(this):
@@ -1384,7 +1400,7 @@ class Simplifier:
         if concat_type is exp.ConcatWs:
             new_args = [sep_expr] + new_args
         elif isinstance(expression, exp.DPipe):
-            return reduce(lambda x, y: exp.DPipe(this=x, expression=y), new_args)
+            return reduce(lambda x, y: exp.DPipe(this=x, expression=y, safe=args["safe"]), new_args)
 
         return concat_type(expressions=new_args, **args)
 
@@ -1449,7 +1465,7 @@ class Simplifier:
             date = extract_date(this)
             if date and expression.unit:
                 return date_literal(
-                    datetime_floor(date, expression.unit.name.lower(), self.dialect),
+                    datetime_floor(date, _trunc_unit(expression.unit, self.dialect), self.dialect),
                     trunc_type,
                 )
         elif comparison not in self.DATETRUNC_COMPARISONS:
@@ -1464,7 +1480,7 @@ class Simplifier:
                 return expression
 
             trunc_arg = l.this
-            unit = l.args["unit"].name.lower()
+            unit = _trunc_unit(l.args["unit"], self.dialect)
             date = extract_date(r)
 
             if not date:
@@ -1487,7 +1503,7 @@ class Simplifier:
                 and all(self._is_datetrunc_predicate(l, r) for r in rs)
                 and isinstance(l, (exp.DateTrunc, exp.TimestampTrunc))
             ):
-                unit = l.args["unit"].name.lower()
+                unit = _trunc_unit(l.args["unit"], self.dialect)
 
                 ranges = []
                 for r in rs:

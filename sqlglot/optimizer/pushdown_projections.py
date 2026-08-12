@@ -4,6 +4,7 @@ import typing as t
 from collections import defaultdict
 
 from sqlglot import alias, exp
+from sqlglot.optimizer.journal import Journal, record
 from sqlglot.optimizer.qualify_columns import Resolver
 from sqlglot.optimizer.scope import Scope, find_in_scope, traverse_scope
 from sqlglot.schema import ensure_schema
@@ -48,6 +49,7 @@ def pushdown_projections(
     schema: dict[str, object] | Schema | None = None,
     remove_unused_selections: bool = True,
     dialect: DialectType = None,
+    journal: Journal | None = None,
 ) -> E:
     """
     Rewrite sqlglot AST to remove unused columns projections.
@@ -121,7 +123,7 @@ def pushdown_projections(
 
         if isinstance(scope.expression, exp.Select):
             if remove_unused_selections:
-                _remove_unused_selections(scope, parent_selections, schema, alias_count)
+                _remove_unused_selections(scope, parent_selections, schema, alias_count, journal)
 
             if scope.scans_all_subscope_columns:
                 continue
@@ -152,7 +154,7 @@ def pushdown_projections(
     return expression
 
 
-def _remove_unused_selections(scope, parent_selections, schema, alias_count):
+def _remove_unused_selections(scope, parent_selections, schema, alias_count, journal=None):
     order = scope.expression.args.get("order")
 
     if order:
@@ -160,6 +162,10 @@ def _remove_unused_selections(scope, parent_selections, schema, alias_count):
         order_refs = {c.name for c in order.find_all(exp.Column) if not c.table}
     else:
         order_refs = set()
+
+    # Resolve bare GROUP BY ordinals before pruning
+    ordinal_refs = _bare_group_by_ordinal_refs(scope.expression)
+    group_ordinal_selection_ids = {id(selection) for _, selection in ordinal_refs}
 
     new_selections = []
     removed = False
@@ -171,7 +177,13 @@ def _remove_unused_selections(scope, parent_selections, schema, alias_count):
     for selection in scope.expression.selects:
         name = selection.alias_or_name
 
-        if select_all or name in parent_selections or name in order_refs or alias_count > 0:
+        if (
+            select_all
+            or name in parent_selections
+            or name in order_refs
+            or alias_count > 0
+            or id(selection) in group_ordinal_selection_ids
+        ):
             new_selections.append(selection)
             alias_count -= 1
         elif find_in_scope(selection, *SET_RETURNING_FUNCTIONS):
@@ -202,7 +214,41 @@ def _remove_unused_selections(scope, parent_selections, schema, alias_count):
     if not new_selections:
         new_selections.append(default_selection(is_agg))
 
+    if journal is not None and removed:
+        record(journal, scope.expression, "expressions")
+
     scope.expression.select(*new_selections, append=False, copy=False)
+
+    # Rewrite bare GROUP BY ordinals to their positions in the pruned SELECT list
+    if ordinal_refs:
+        new_pos = {id(selection): i + 1 for i, selection in enumerate(new_selections)}
+        for node, old_selection in ordinal_refs:
+            pos = new_pos.get(id(old_selection))
+            if pos is not None and int(node.this) != pos:
+                if journal is not None:
+                    record(journal, node, "this")
+                node.set("this", str(pos))
 
     if removed:
         scope.clear_cache()
+
+
+def _bare_group_by_ordinal_refs(
+    select: exp.Select,
+) -> list[tuple[exp.Literal, exp.Expr]]:
+    """Map each bare GROUP BY integer ordinal to its pre-prune projection."""
+    group = select.args.get("group")
+    if not group:
+        return []
+
+    selects = select.selects
+    n = len(selects)
+    refs: list[tuple[exp.Literal, exp.Expr]] = []
+
+    for node in group.expressions:
+        if node.is_int and isinstance(node, exp.Literal):
+            pos = int(node.this)
+            if 1 <= pos <= n:
+                refs.append((node, selects[pos - 1]))
+
+    return refs

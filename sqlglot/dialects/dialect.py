@@ -1701,7 +1701,7 @@ def timestamptrunc_sql(
     func: str = "DATE_TRUNC", zone: bool = False
 ) -> t.Callable[[Generator, exp.TimestampTrunc], str]:
     def _timestamptrunc_sql(self: Generator, expression: exp.TimestampTrunc) -> str:
-        args = [unit_to_str(expression), expression.this]
+        args = [weekstart_unit_to_str(self, expression), expression.this]
         if zone:
             args.append(expression.args.get("zone"))
         return self.func(func, *args)
@@ -2061,10 +2061,26 @@ def unit_to_str(expression: exp.Expr, default: str = "DAY") -> exp.Expr | None:
     if not unit:
         return exp.Literal.string(default) if default else None
 
+    if isinstance(unit, exp.WeekStart):
+        # WEEK(<day>) is BigQuery-only syntax, so it degrades to the plain WEEK unit. Unlike
+        # Generator.weekstart_name, this can't warn about a changed week start (no generator
+        # access here) - callers that need the warning should use weekstart_unit_to_str
+        return exp.Literal.string("WEEK")
+
     if isinstance(unit, exp.Placeholder) or type(unit) not in (exp.Var, exp.Literal):
         return unit
 
     return exp.Literal.string(unit.name)
+
+
+def weekstart_unit_to_str(
+    self: Generator, expression: exp.Expr, default: str = "DAY"
+) -> exp.Expr | None:
+    unit = expression.args.get("unit")
+    if isinstance(unit, exp.WeekStart):
+        return exp.Literal.string(self.weekstart_name(unit))
+
+    return unit_to_str(expression, default)
 
 
 def unit_to_var(expression: exp.Expr, default: str = "DAY") -> exp.Expr | None:
@@ -2090,10 +2106,14 @@ WEEK_START_DAY_TO_DOW = {
 }
 
 
+def week_offset_to_dow(offset: int) -> int:
+    """Convert a dialect's WEEK_OFFSET (days relative to Monday) to the ISO day number of its week start."""
+    return offset % 7 + 1
+
+
 def week_unit_to_dow(unit: exp.Expr | None) -> int | None:
     """
-    Compute the week start day for a week-ish diff unit, e.g BigQuery's WEEK(<day>)
-    or ISOWEEK unit parts.
+    Compute the week start day for a week-ish diff unit, e.g BigQuery's WEEK(<day>) or ISOWEEK unit parts.
 
     Args:
         unit: The unit expression (Var for WEEK/ISOWEEK or WeekStart)
@@ -2193,7 +2213,11 @@ def build_json_extract_path(
         for arg in args[1:]:
             if not isinstance(arg, exp.Literal):
                 # We use the fallback parser because we can't really transpile non-literals safely
-                return expr_type.from_arg_list(args)
+                return expr_type(
+                    this=seq_get(args, 0),
+                    expression=seq_get(args, 1),
+                    expressions=list(args[2:]) or None,
+                )
 
             text = arg.name
             if is_int(text) and (not arrow_req_json_type or not arg.is_string):

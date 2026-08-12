@@ -292,7 +292,7 @@ class BigQueryGenerator(generator.Generator):
         exp.RowNumber,
     )
 
-    TS_OR_DS_TYPES = (
+    TS_OR_DS_TYPES: t.ClassVar = (
         exp.TsOrDsToDatetime,
         exp.TsOrDsToTimestamp,
         exp.TsOrDsToTime,
@@ -579,6 +579,13 @@ class BigQueryGenerator(generator.Generator):
         "with",
         "within",
     }
+
+    def weekstart_sql(self, expression: exp.WeekStart) -> str:
+        if expression.this.name.upper() == "SUNDAY":
+            # BigQuery specific optimization since WEEK(SUNDAY) == WEEK
+            return "WEEK"
+
+        return self.func("WEEK", expression.this)
 
     def datetrunc_sql(self, expression: exp.DateTrunc) -> str:
         unit = expression.unit

@@ -323,6 +323,7 @@ class TSQLParser(parser.Parser):
     LOG_DEFAULTS_TO_LN = True
     STRING_ALIASES = True
     NO_PAREN_IF_COMMANDS = False
+    UNPIVOT_VALUE_COLUMNS_FIRST = True
 
     NO_PAREN_FUNCTIONS = {
         **parser.Parser.NO_PAREN_FUNCTIONS,
@@ -408,16 +409,15 @@ class TSQLParser(parser.Parser):
         ("ENCRYPTION", "RECOMPILE", "SCHEMABINDING", "NATIVE_COMPILATION", "EXECUTE"), tuple()
     )
 
-    COLUMN_DEFINITION_MODES = {"OUT", "OUTPUT", "READONLY"}
+    COLUMN_DEFINITION_MODES: t.ClassVar = {"OUT", "OUTPUT", "READONLY"}
 
-    RETURNS_TABLE_TOKENS = parser.Parser.ID_VAR_TOKENS - {
+    RETURNS_TABLE_TOKENS: t.ClassVar = parser.Parser.ID_VAR_TOKENS - {
         TokenType.TABLE,
         *parser.Parser.TYPE_TOKENS,
     }
 
     STATEMENT_PARSERS = {
         **parser.Parser.STATEMENT_PARSERS,
-        TokenType.DECLARE: lambda self: self._parse_declare(),
         TokenType.EXECUTE: lambda self: self._parse_execute(),
     }
 
@@ -806,6 +806,12 @@ class TSQLParser(parser.Parser):
             if isinstance(collation, exp.Column) and isinstance(collation.this, exp.Identifier):
                 identifier = collation.this
                 collation.set("this", exp.Var(this=identifier.name))
+
+            if expression.args.get("dtype"):
+                if self._match_pair(TokenType.NOT, TokenType.NULL):
+                    expression.set("allow_null", False)
+                elif self._match(TokenType.NULL):
+                    expression.set("allow_null", True)
 
         return expression
 

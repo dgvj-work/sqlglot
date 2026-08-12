@@ -1,6 +1,7 @@
 from sqlglot import exp, parse_one
 from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.optimizer.annotate_types import annotate_types
+from sqlglot.optimizer.qualify import qualify
 from tests.dialects.test_dialect import Validator
 
 
@@ -562,6 +563,30 @@ class TestTSQL(Validator):
 
         self.validate_identity("OBJECT_ID('foo')")
         self.validate_identity("OBJECT_ID('foo', 'U')")
+
+    def test_unpivot_value_column_comes_first(self):
+        # T-SQL emits an UNPIVOT's value column ahead of its name column; DuckDB,
+        # Snowflake, Oracle and Spark all emit it after. Verified against SQL Server:
+        # SELECT * over this UNPIVOT returns (id, revenue, month).
+        schema = {"t": {"id": "int", "jan": "int", "feb": "int"}}
+        expression = qualify(
+            parse_one(
+                "SELECT * FROM t UNPIVOT(revenue FOR month IN (jan, feb)) AS u", dialect="tsql"
+            ),
+            schema=schema,
+            dialect="tsql",
+        )
+        self.assertEqual([s.alias_or_name for s in expression.selects], ["id", "revenue", "month"])
+
+        # ... whereas the same query read as another dialect keeps the name column first
+        expression = qualify(
+            parse_one(
+                "SELECT * FROM t UNPIVOT(revenue FOR month IN (jan, feb)) AS u", dialect="duckdb"
+            ),
+            schema=schema,
+            dialect="duckdb",
+        )
+        self.assertEqual([s.alias_or_name for s in expression.selects], ["id", "month", "revenue"])
 
     def test_null_ordering_simulation_resolves_ordered_against_projection(self):
         # T-SQL hits the same NULLS FIRST/LAST CASE simulation as MySQL
@@ -1311,6 +1336,27 @@ WHERE
             write={
                 "": "ALTER TABLE a ALTER COLUMN b SET DATA TYPE INT",
                 "tsql": "ALTER TABLE a ALTER COLUMN b INTEGER",
+            },
+        )
+        self.validate_identity("ALTER TABLE a ALTER COLUMN b INTEGER NOT NULL")
+        self.validate_identity("ALTER TABLE a ALTER COLUMN b INTEGER NULL")
+        self.validate_identity(
+            "ALTER TABLE a ALTER COLUMN b VARCHAR(10) COLLATE Latin1_General_CI_AS NOT NULL"
+        )
+        self.validate_all(
+            "ALTER TABLE a ALTER COLUMN b INTEGER NOT NULL",
+            write={
+                "": UnsupportedError,
+                "hive": UnsupportedError,
+                "singlestore": UnsupportedError,
+                "mysql": "ALTER TABLE a MODIFY COLUMN b INT NOT NULL",
+                "starrocks": "ALTER TABLE a MODIFY COLUMN b INT NOT NULL",
+            },
+        )
+        self.validate_all(
+            "ALTER TABLE a ALTER COLUMN b INTEGER NULL",
+            write={
+                "mysql": "ALTER TABLE a MODIFY COLUMN b INT NULL",
             },
         )
         self.validate_all(

@@ -1059,6 +1059,39 @@ class TestExecutor(unittest.TestCase):
         self.assertEqual(result.columns, ("x",))
         self.assertEqual(result.rows, [([1, 2, 3],)])
 
+    def test_typed_division_respects_operand_types(self):
+        # https://github.com/tobymao/sqlglot/issues/8132
+        schema = {"t": {"n": "INT"}}
+        tables = {"t": [{"n": 10}]}
+
+        for dialect in ("postgres", "sqlite"):
+            with self.subTest(f"{dialect} float divisor"):
+                result = execute(
+                    "SELECT n / 3.0 AS x FROM t",
+                    schema=schema,
+                    tables=tables,
+                    dialect=dialect,
+                )
+                self.assertEqual(result.rows, [(10 / 3.0,)])
+
+            with self.subTest(f"{dialect} int divisor"):
+                result = execute(
+                    "SELECT n / 3 AS x FROM t",
+                    schema=schema,
+                    tables=tables,
+                    dialect=dialect,
+                )
+                self.assertEqual(result.rows, [(3,)])
+
+            with self.subTest(f"{dialect} cast to float"):
+                result = execute(
+                    "SELECT CAST(n AS DOUBLE) / 3 AS x FROM t",
+                    schema=schema,
+                    tables=tables,
+                    dialect=dialect,
+                )
+                self.assertEqual(result.rows, [(10 / 3,)])
+
     def test_agg_order(self):
         plan = Plan(
             optimize("""

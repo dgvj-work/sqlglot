@@ -66,8 +66,14 @@ def _div_sql(self: generator.Generator, e: exp.Div) -> str:
 
     sql = f"DIV({self.sql(e, 'this')}, {denominator})"
 
+    # TYPED_DIVISION dialects mark every `/` as typed; only truncate when both
+    # operands are integers (matching Generator.div_sql / Postgres semantics).
     if e.args.get("typed"):
-        sql = f"int({sql})"
+        left, right = e.this, e.expression
+        if left.is_type(*exp.DataType.INTEGER_TYPES) and right.is_type(
+            *exp.DataType.INTEGER_TYPES
+        ):
+            sql = f"int({sql})"
 
     return sql
 

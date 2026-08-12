@@ -70,9 +70,7 @@ def _div_sql(self: generator.Generator, e: exp.Div) -> str:
     # operands are integers (matching Generator.div_sql / Postgres semantics).
     if e.args.get("typed"):
         left, right = e.this, e.expression
-        if left.is_type(*exp.DataType.INTEGER_TYPES) and right.is_type(
-            *exp.DataType.INTEGER_TYPES
-        ):
+        if left.is_type(*exp.DataType.INTEGER_TYPES) and right.is_type(*exp.DataType.INTEGER_TYPES):
             sql = f"int({sql})"
 
     return sql

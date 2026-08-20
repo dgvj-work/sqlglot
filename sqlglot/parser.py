@@ -9319,12 +9319,18 @@ class Parser:
                 options.append(self._prev.text.upper())
 
         this: exp.Expr | None = None
+        tables: list[exp.Expr] | None = None
         inner_expression: exp.Expr | None = None
 
         kind = self._curr.text.upper() if self._curr else None
 
         if self._match(TokenType.TABLE) or self._match(TokenType.INDEX):
+            # https://dev.mysql.com/doc/refman/8.4/en/analyze-table.html
+            # ANALYZE TABLE supports a comma-separated list; INDEX does not.
+            matched_table = self._prev.token_type == TokenType.TABLE
             this = self._parse_table_parts()
+            if matched_table and self._match(TokenType.COMMA):
+                tables = self._parse_csv(self._parse_table_parts)
         elif self._match_text_seq("TABLES"):
             if self._match_set((TokenType.FROM, TokenType.IN)):
                 kind = f"{kind} {self._prev.text.upper()}"
@@ -9341,6 +9347,8 @@ class Parser:
             # Empty kind  https://prestodb.io/docs/current/sql/analyze.html
             kind = None
             this = self._parse_table_parts()
+            if this is not None and self._match(TokenType.COMMA):
+                tables = self._parse_csv(self._parse_table_parts)
 
         partition = self._try_parse(self._parse_partition)
         if not partition and self._match_texts(self.PARTITION_KEYWORDS):
@@ -9362,6 +9370,7 @@ class Parser:
             exp.Analyze(
                 kind=kind,
                 this=this,
+                tables=tables,
                 mode=mode,
                 partition=partition,
                 properties=properties,

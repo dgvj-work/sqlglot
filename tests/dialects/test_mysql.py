@@ -1681,6 +1681,10 @@ COMMENT='客户账户表'"""
     def test_analyze(self):
         self.validate_identity("ANALYZE LOCAL TABLE tbl")
         self.validate_identity("ANALYZE NO_WRITE_TO_BINLOG TABLE tbl")
+        # https://dev.mysql.com/doc/refman/8.4/en/analyze-table.html
+        self.validate_identity("ANALYZE TABLE t1, t2")
+        self.validate_identity("ANALYZE LOCAL TABLE t1, t2")
+        self.validate_identity("ANALYZE t1, t2")
         self.validate_identity("ANALYZE tbl UPDATE HISTOGRAM ON col1")
         self.validate_identity("ANALYZE tbl UPDATE HISTOGRAM ON col1 USING DATA 'json_data'")
         self.validate_identity("ANALYZE tbl UPDATE HISTOGRAM ON col1 WITH 5 BUCKETS")

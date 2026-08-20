@@ -6049,6 +6049,8 @@ class Generator:
         kind = self.sql(expression, "kind")
         kind = f" {kind}" if kind else ""
         this = self.sql(expression, "this")
+        tables = self.expressions(expression, key="tables", flat=True)
+        this = f"{this}, {tables}" if tables else this
         this = f" {this}" if this else ""
         mode = self.sql(expression, "mode")
         mode = f" {mode}" if mode else ""

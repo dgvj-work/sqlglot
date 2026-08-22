@@ -39,6 +39,12 @@ class TestMySQL(Validator):
         self.validate_identity("CREATE TABLE foo (a BIGINT, SPATIAL INDEX (b))")
         self.validate_identity("CREATE TABLE foo (a INT UNSIGNED ZEROFILL)")
         self.validate_identity("CREATE TABLE foo (a INT INVISIBLE)")
+        # Deprecated BINARY attribute on string types (MySQL treats as binary collation).
+        self.validate_identity("CREATE TABLE foo (a VARCHAR(16) BINARY)")
+        self.validate_identity("CREATE TABLE foo (a CHAR(10) BINARY NOT NULL)")
+        self.validate_identity(
+            "CREATE TABLE t1 (Host VARCHAR(16) BINARY NOT NULL DEFAULT '', User VARCHAR(16) BINARY NOT NULL DEFAULT '', PRIMARY KEY (Host, User)) ENGINE=MyISAM"
+        )
         self.validate_identity("ALTER TABLE t ADD COLUMN c INT INVISIBLE")
         self.validate_identity("ALTER TABLE t1 ADD COLUMN x INT, ALGORITHM=INPLACE, LOCK=EXCLUSIVE")
         self.validate_identity("ALTER TABLE t ADD INDEX `i` (`c`)")

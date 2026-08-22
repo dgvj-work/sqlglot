@@ -37,6 +37,10 @@ class InvisibleColumnConstraint(Expression, ColumnConstraintKind):
     arg_types = {}
 
 
+class BinaryColumnConstraint(Expression, ColumnConstraintKind):
+    arg_types = {}
+
+
 class ZeroFillColumnConstraint(ColumnConstraint):
     arg_types = {}
 

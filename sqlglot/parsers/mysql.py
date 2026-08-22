@@ -245,6 +245,7 @@ class MySQLParser(parser.Parser):
         "SPATIAL": lambda self: self._parse_index_constraint(kind="SPATIAL"),
         "ZEROFILL": lambda self: self.expression(exp.ZeroFillColumnConstraint()),
         "INVISIBLE": lambda self: self.expression(exp.InvisibleColumnConstraint()),
+        "BINARY": lambda self: self.expression(exp.BinaryColumnConstraint()),
     }
 
     ALTER_PARSERS = {

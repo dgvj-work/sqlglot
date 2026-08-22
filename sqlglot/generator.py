@@ -241,6 +241,7 @@ class Generator:
             f"PROJECTION POLICY {self.sql(e, 'this')}"
         ),
         exp.InvisibleColumnConstraint: lambda self, e: "INVISIBLE",
+        exp.BinaryColumnConstraint: lambda self, e: "BINARY",
         exp.ZeroFillColumnConstraint: lambda self, e: "ZEROFILL",
         exp.Put: lambda self, e: self.get_put_sql(e),
         exp.RemoteWithConnectionModelProperty: lambda self, e: (

@@ -282,8 +282,6 @@ class ClickHouseGenerator(generator.Generator):
         exp.ArrayDistinct: rename_func("arrayDistinct"),
         exp.ArrayConcat: rename_func("arrayConcat"),
         exp.ArrayContains: rename_func("has"),
-        exp.ArrayFilter: lambda self, e: self.func("arrayFilter", e.expression, e.this),
-        exp.Transform: lambda self, e: self.func("arrayMap", e.expression, e.this),
         exp.ArrayRemove: remove_from_array_using_filter,
         exp.ArrayReverse: rename_func("arrayReverse"),
         exp.ArraySlice: rename_func("arraySlice"),
@@ -418,6 +416,16 @@ class ClickHouseGenerator(generator.Generator):
         exp.DType.POLYGON,
         exp.DType.MULTIPOLYGON,
     }
+
+    def transform_sql(self, expression: exp.Transform) -> str:
+        return self.func(
+            "arrayMap", expression.expression, expression.this, *expression.expressions
+        )
+
+    def arrayfilter_sql(self, expression: exp.ArrayFilter) -> str:
+        return self.func(
+            "arrayFilter", expression.expression, expression.this, *expression.expressions
+        )
 
     def groupconcat_sql(self, expression: exp.GroupConcat) -> str:
         this = expression.this

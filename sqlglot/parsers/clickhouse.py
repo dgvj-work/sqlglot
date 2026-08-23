@@ -42,6 +42,24 @@ def _build_count_if(args: list) -> exp.CountIf | exp.CombinedAggFunc:
     return exp.CombinedAggFunc(this="countIf", expressions=args)
 
 
+def _build_array_map(args: list) -> exp.Transform:
+    # ClickHouse: arrayMap(lambda, arr1[, arr2, ...]) — arg order is reversed vs exp.Transform.
+    return exp.Transform(
+        this=seq_get(args, 1),
+        expression=seq_get(args, 0),
+        expressions=list(args[2:]) or None,
+    )
+
+
+def _build_array_filter(args: list) -> exp.ArrayFilter:
+    # ClickHouse: arrayFilter(lambda, arr1[, arr2, ...]) — arg order is reversed vs exp.ArrayFilter.
+    return exp.ArrayFilter(
+        this=seq_get(args, 1),
+        expression=seq_get(args, 0),
+        expressions=list(args[2:]) or None,
+    )
+
+
 def _build_str_to_date(args: list) -> exp.Cast | exp.Anonymous:
     if len(args) == 3:
         return exp.Anonymous(this="STR_TO_DATE", expressions=args)
@@ -271,10 +289,8 @@ class ClickHouseParser(parser.Parser):
         "ARRAYMIN": exp.ArrayMin.from_arg_list,
         "ARRAYREVERSE": exp.ArrayReverse.from_arg_list,
         "ARRAYSLICE": exp.ArraySlice.from_arg_list,
-        "ARRAYFILTER": lambda args: exp.ArrayFilter(
-            this=seq_get(args, 1), expression=seq_get(args, 0)
-        ),
-        "ARRAYMAP": lambda args: exp.Transform(this=seq_get(args, 1), expression=seq_get(args, 0)),
+        "ARRAYFILTER": _build_array_filter,
+        "ARRAYMAP": _build_array_map,
         "CURRENTDATABASE": exp.CurrentDatabase.from_arg_list,
         "CURRENTSCHEMAS": exp.CurrentSchemas.from_arg_list,
         "COUNTIF": _build_count_if,

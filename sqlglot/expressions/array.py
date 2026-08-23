@@ -59,7 +59,8 @@ class ArrayConcat(Expression, Func):
 
 
 class ArrayFilter(Expression, Func):
-    arg_types = {"this": True, "expression": True}
+    arg_types = {"this": True, "expression": True, "expressions": False}
+    is_var_len_args = True
     _sql_names = ["FILTER", "ARRAY_FILTER"]
 
 
@@ -217,7 +218,9 @@ class Reduce(Expression, Func):
 
 
 class Transform(Expression, Func):
-    arg_types = {"this": True, "expression": True}
+    # `expressions` holds extra arrays for multi-arg lambdas (ClickHouse arrayMap/arrayFilter).
+    arg_types = {"this": True, "expression": True, "expressions": False}
+    is_var_len_args = True
 
 
 # Table-valued / UDTF

@@ -1606,7 +1606,6 @@ class DuckDBGenerator(generator.Generator):
         exp.ArrayConcat: array_concat_sql("LIST_CONCAT"),
         exp.ArrayContains: _array_contains_sql,
         exp.ArrayOverlaps: _array_overlaps_sql,
-        exp.ArrayFilter: rename_func("LIST_FILTER"),
         exp.ArrayInsert: _array_insert_sql,
         exp.ArrayPosition: lambda self, e: (
             self.sql(
@@ -1750,7 +1749,6 @@ class DuckDBGenerator(generator.Generator):
             "EPOCH", self.func("STRPTIME", e.this, self.format_time(e))
         ),
         exp.Struct: _struct_sql,
-        exp.Transform: rename_func("LIST_TRANSFORM"),
         exp.TimeAdd: _date_delta_to_binary_interval_op(),
         exp.TimeSub: _date_delta_to_binary_interval_op(),
         exp.Time: no_time_sql,
@@ -2495,6 +2493,14 @@ class DuckDBGenerator(generator.Generator):
 
         replacements = {"seed": seed_value, "length": length}
         return f"({self.sql(exp.replace_placeholders(self.RANDSTR_TEMPLATE, **replacements))})"
+
+    @unsupported_args("expressions")
+    def transform_sql(self, expression: exp.Transform) -> str:
+        return self.func("LIST_TRANSFORM", expression.this, expression.expression)
+
+    @unsupported_args("expressions")
+    def arrayfilter_sql(self, expression: exp.ArrayFilter) -> str:
+        return self.func("LIST_FILTER", expression.this, expression.expression)
 
     @unsupported_args("finish")
     def reduce_sql(self, expression: exp.Reduce) -> str:

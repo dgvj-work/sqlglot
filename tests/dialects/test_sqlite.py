@@ -52,6 +52,8 @@ class TestSQLite(Validator):
         self.validate_identity(
             "SELECT JSON_EXTRACT('[10, 20, [30, 40]]', '$[2]', '$[0]', '$[1]')",
         )
+        self.validate_identity("SELECT a -> 'it''s' FROM t")
+        self.validate_identity("SELECT a ->> 'it''s' FROM t")
         # Single-path json_extract() returns an SQL value like ->>, except that
         # object/array results keep the JSON subtype (json_subtype variant);
         # each of the three spellings round-trips to itself

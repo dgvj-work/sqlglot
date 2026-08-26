@@ -559,6 +559,10 @@ class TestHive(Validator):
         self.validate_identity(
             "SELECT a, b, SUM(c) FROM tabl AS t GROUP BY a, FOO(b), GROUPING SETS ((a, FOO(b)), a)"
         )
+        # Hive-compat: no comma before GROUPING SETS (#8266)
+        self.validate_identity(
+            "SELECT COUNT(1), d, h FROM t GROUP BY d, h GROUPING SETS ((d, h), (d))"
+        )
         self.validate_identity(
             "SELECT key, value, GROUPING__ID, COUNT(*) FROM T1 GROUP BY key, value WITH CUBE"
         )

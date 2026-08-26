@@ -5579,6 +5579,9 @@ class Parser:
                 )
             )
 
+            # `_parse_csv` consumes a trailing comma before GROUPING SETS when present.
+            trailing_comma = bool(self._prev and self._prev.token_type == TokenType.COMMA)
+
             before_with_index = self._index
             with_prefix = self._match(TokenType.WITH)
 
@@ -5587,6 +5590,12 @@ class Parser:
                 elements[key].append(cube_or_rollup)
             elif grouping_sets := self._parse_grouping_sets():
                 elements["grouping_sets"].append(grouping_sets)
+                if (
+                    elements["expressions"]
+                    and not trailing_comma
+                    and "groupings_sep" not in elements
+                ):
+                    elements["groupings_sep"] = ""
             elif self._match_text_seq("TOTALS"):
                 elements["totals"] = True  # type: ignore
 

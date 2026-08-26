@@ -628,6 +628,7 @@ class Group(Expression):
         "rollup": False,
         "totals": False,
         "all": False,
+        "groupings_sep": False,
     }
 
 

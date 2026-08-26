@@ -242,6 +242,7 @@ class HiveGenerator(generator.Generator):
     SUPPORTS_MEDIAN = False
     ARRAY_SIZE_NAME = "SIZE"
     ALTER_SET_TYPE = ""
+    PRESERVE_GROUPINGS_SEP = True
 
     EXPRESSIONS_WITHOUT_NESTED_CTES = {
         exp.Insert,

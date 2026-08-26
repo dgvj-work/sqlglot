@@ -352,6 +352,9 @@ class Generator:
     # The separator for grouping sets and rollups
     GROUPINGS_SEP = ","
 
+    # When True, honor Group.groupings_sep from parse (Hive-compat vs comma form)
+    PRESERVE_GROUPINGS_SEP = False
+
     # The string used for creating an index on a table
     INDEX_ON = "ON"
 
@@ -2807,12 +2810,16 @@ class Generator:
         cube = self.expressions(expression, key="cube")
         rollup = self.expressions(expression, key="rollup")
 
+        sep = self.GROUPINGS_SEP
+        if self.PRESERVE_GROUPINGS_SEP:
+            sep = expression.args.get("groupings_sep", sep)
+
         groupings = csv(
             self.seg(grouping_sets) if grouping_sets else "",
             self.seg(cube) if cube else "",
             self.seg(rollup) if rollup else "",
             self.seg("WITH TOTALS") if expression.args.get("totals") else "",
-            sep=self.GROUPINGS_SEP,
+            sep=sep,
         )
 
         if (
@@ -2820,7 +2827,7 @@ class Generator:
             and groupings
             and groupings.strip() not in ("WITH CUBE", "WITH ROLLUP")
         ):
-            group_by = f"{group_by}{self.GROUPINGS_SEP}"
+            group_by = f"{group_by}{sep}"
 
         return f"{group_by}{groupings}"
 

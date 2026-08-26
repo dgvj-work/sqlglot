@@ -1529,3 +1529,21 @@ TBLPROPERTIES (
                 "duckdb": "SELECT CASE WHEN b <> 0 THEN a / b ELSE NULL END",
             },
         )
+
+    def test_grouping_sets_separator(self):
+        # Mixed analytics (comma) and Hive-compat (whitespace) forms must both round-trip (#8266)
+        hive_compat = "SELECT COUNT(1), d, h FROM t GROUP BY d, h GROUPING SETS ((d, h), (d))"
+        mixed = "SELECT COUNT(1), d, h FROM t GROUP BY d, h, GROUPING SETS ((d, h), (d))"
+
+        self.validate_identity(hive_compat)
+        self.validate_identity(mixed)
+
+        ast_hive = parse_one(hive_compat, dialect="spark")
+        ast_mixed = parse_one(mixed, dialect="spark")
+        self.assertNotEqual(ast_hive.args["group"], ast_mixed.args["group"])
+        self.assertEqual(ast_hive.args["group"].args.get("groupings_sep"), "")
+        self.assertIsNone(ast_mixed.args["group"].args.get("groupings_sep"))
+
+        # Non-Hive dialects still emit the comma form when transpiling Hive-compat input
+        self.assertEqual(ast_hive.sql(dialect="presto"), mixed)
+        self.assertEqual(ast_hive.sql(dialect="trino"), mixed)

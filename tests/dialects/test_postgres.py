@@ -2149,3 +2149,31 @@ CROSS JOIN JSON_ARRAY_ELEMENTS(CAST(JSON_EXTRACT_PATH(tbox, 'boxes') AS JSON)) A
         is_not_null = self.parse_one("r IS NOT NULL")
         is_not_null.assert_is(exp.Is)
         self.assertTrue(is_not_null.args.get("negate"))
+
+    def test_lock_table(self):
+        # https://www.postgresql.org/docs/current/sql-lock.html
+        lock_cmds = [
+            "LOCK TABLE t",
+            "LOCK t",
+            "LOCK TABLE t IN ACCESS SHARE MODE",
+            "LOCK TABLE t IN ROW SHARE MODE",
+            "LOCK TABLE t IN ROW EXCLUSIVE MODE",
+            "LOCK TABLE t IN SHARE UPDATE EXCLUSIVE MODE",
+            "LOCK TABLE t IN SHARE MODE",
+            "LOCK TABLE t IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE t IN EXCLUSIVE MODE",
+            "LOCK TABLE t IN ACCESS EXCLUSIVE MODE",
+            "LOCK TABLE a, b IN SHARE ROW EXCLUSIVE MODE",
+            "LOCK TABLE ONLY t IN EXCLUSIVE MODE NOWAIT",
+            "LOCK TABLE t * IN ACCESS SHARE MODE",
+            "LOCK TABLE skyeye_container, skyeye_container_milestone, container, container_milestone, shipment_order IN SHARE ROW EXCLUSIVE MODE",
+        ]
+
+        for sql in lock_cmds:
+            with self.subTest(sql):
+                self.validate_identity(sql, check_command_warning=True)
+
+        # SELECT row locks must keep working (FOR UPDATE / LOCK IN SHARE MODE)
+        self.validate_identity("SELECT * FROM t FOR UPDATE")
+        self.validate_identity("SELECT * FROM t FOR SHARE")
+        self.validate_identity("SELECT * FROM t LOCK IN SHARE MODE", "SELECT * FROM t FOR SHARE")

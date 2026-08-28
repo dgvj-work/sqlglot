@@ -181,6 +181,7 @@ class PostgresParser(parser.Parser):
     STATEMENT_PARSERS = {
         **parser.Parser.STATEMENT_PARSERS,
         TokenType.END: lambda self: self._parse_commit_or_rollback(),
+        TokenType.LOCK: lambda self: self._parse_as_command(self._prev),
     }
 
     UNARY_PARSERS = {

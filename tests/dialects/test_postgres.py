@@ -31,6 +31,26 @@ class TestPostgres(Validator):
         self.validate_identity("SELECT '%' SIMILAR TO '^%' ESCAPE '^'")
         self.validate_identity("SELECT GET_BIT(CAST(44 AS BIT(10)), 6)")
         self.validate_identity("SELECT * FROM t GROUP BY ROLLUP (a || '^' || b)")
+        # GROUPING SETS / ROLLUP / CUBE must stop before LIMIT / OFFSET / WINDOW (#8279)
+        self.validate_identity("SELECT a FROM t GROUP BY GROUPING SETS ((a)) LIMIT 5")
+        self.validate_identity("SELECT a FROM t GROUP BY GROUPING SETS ((a)) OFFSET 5")
+        self.validate_identity(
+            "SELECT a FROM t GROUP BY ROLLUP(a) LIMIT 5",
+            "SELECT a FROM t GROUP BY ROLLUP (a) LIMIT 5",
+        )
+        self.validate_identity(
+            "SELECT a FROM t GROUP BY CUBE(a) OFFSET 5",
+            "SELECT a FROM t GROUP BY CUBE (a) OFFSET 5",
+        )
+        self.validate_identity(
+            "SELECT a FROM t GROUP BY GROUPING SETS ((a)) WINDOW w AS (ORDER BY a)"
+        )
+        self.validate_identity("SELECT a FROM t GROUP BY GROUPING SETS ((a)) HAVING a > 1")
+        self.validate_identity("SELECT a FROM t GROUP BY GROUPING SETS ((a)) ORDER BY a")
+        self.validate_identity(
+            "SELECT a, b FROM t GROUP BY ROLLUP(a), CUBE(b) LIMIT 3",
+            "SELECT a, b FROM t GROUP BY CUBE (b), ROLLUP (a) LIMIT 3",
+        )
         self.validate_identity("SELECT COSH(1.5)")
         self.validate_identity("SELECT EXP(1)")
         self.validate_identity(

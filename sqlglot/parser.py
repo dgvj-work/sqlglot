@@ -5563,10 +5563,13 @@ class Parser:
         elif self._match(TokenType.DISTINCT):
             elements["all"] = False
 
-        if self._match_set(self.QUERY_MODIFIER_TOKENS, advance=False):
-            return self.expression(exp.Group(**elements), comments=comments)  # type: ignore
-
         while True:
+            # Re-check each iteration: after GROUPING SETS / ROLLUP / CUBE the loop
+            # continues, and LIMIT/OFFSET/WINDOW are also ID_VAR_TOKENS so they would
+            # otherwise be consumed as group expressions (#8279).
+            if self._match_set(self.QUERY_MODIFIER_TOKENS, advance=False):
+                break
+
             index = self._index
 
             elements["expressions"].extend(

@@ -227,6 +227,13 @@ class TestClickhouse(Validator):
             "CREATE TABLE t (foo String CODEC(LZ4HC(9), ZSTD, DELTA), size String ALIAS formatReadableSize(size_bytes), INDEX idx1 a TYPE bloom_filter(0.001) GRANULARITY 1, INDEX idx2 a TYPE set(100) GRANULARITY 2, INDEX idx3 a TYPE minmax GRANULARITY 3)"
         )
         self.validate_identity(
+            "CREATE TABLE t (x Int32 COMPRESS ZSTD)",
+            "CREATE TABLE t (x Int32 CODEC(ZSTD))",
+        )
+        self.validate_identity(
+            "CREATE TABLE t (x Int32 CODEC(ZSTD))",
+        )
+        self.validate_identity(
             "SELECT generate_series FROM generate_series(0, 10) AS g(x)",
         )
         self.validate_identity(

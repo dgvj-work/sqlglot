@@ -299,9 +299,6 @@ class ClickHouseGenerator(generator.Generator):
         exp.CurrentSchemas: rename_func("CURRENT_SCHEMAS"),
         exp.CountIf: rename_func("countIf"),
         exp.CosineDistance: rename_func("cosineDistance"),
-        exp.CompressColumnConstraint: lambda self, e: (
-            f"CODEC({self.expressions(e, key='this', flat=True)})"
-        ),
         exp.ComputedColumnConstraint: lambda self, e: (
             f"{'MATERIALIZED' if e.args.get('persisted') else 'ALIAS'} {self.sql(e, 'this')}"
         ),
@@ -639,6 +636,13 @@ class ClickHouseGenerator(generator.Generator):
     def prewhere_sql(self, expression: exp.PreWhere) -> str:
         this = self.indent(self.sql(expression, "this"))
         return f"{self.seg('PREWHERE')}{self.sep()}{this}"
+
+    def compresscolumnconstraint_sql(self, expression: exp.CompressColumnConstraint) -> str:
+        if isinstance(expression.this, list):
+            this = self.expressions(expression, key="this", flat=True)
+        else:
+            this = self.sql(expression, "this")
+        return f"CODEC({this})"
 
     def indexcolumnconstraint_sql(self, expression: exp.IndexColumnConstraint) -> str:
         this = self.sql(expression, "this")

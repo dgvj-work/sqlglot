@@ -17,6 +17,9 @@ class SQLite(Dialect):
     TYPED_DIVISION = True
     SAFE_DIVISION = True
     SAFE_TO_ELIMINATE_DOUBLE_NEGATION = False
+    # Multi-arg max()/min() return NULL if any argument is NULL:
+    # https://www.sqlite.org/lang_corefunc.html#max_scalar
+    LEAST_GREATEST_IGNORES_NULLS = False
 
     class Tokenizer(tokens.Tokenizer):
         IDENTIFIERS = ['"', ("[", "]"), "`"]

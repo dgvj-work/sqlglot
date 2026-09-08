@@ -338,17 +338,31 @@ class SQLiteGenerator(generator.Generator):
         separator = expression.args.get("separator")
         return f"GROUP_CONCAT({distinct_sql}{self.format_args(this, separator)})"
 
-    def least_sql(self, expression: exp.Least) -> str:
-        if expression.expressions:
-            return rename_func("MIN")(self, expression)
+    def _null_ignoring_minmax_sql(self, expression: exp.Greatest | exp.Least, name: str) -> str:
+        # SQLite's multi-arg max()/min() return NULL if any arg is NULL, while
+        # Postgres/DuckDB GREATEST/LEAST ignore NULLs. Rotate COALESCE so each
+        # position can surface a non-NULL value when one exists.
+        args = [expression.this, *expression.expressions]
+        n = len(args)
+        if n == 1:
+            return self.sql(args[0])
 
-        return self.sql(expression, "this")
+        coalesced = [exp.func("coalesce", *(args[(i + j) % n] for j in range(n))) for i in range(n)]
+        return self.func(name, *coalesced)
+
+    def least_sql(self, expression: exp.Least) -> str:
+        if not expression.expressions:
+            return self.sql(expression, "this")
+        if expression.args.get("ignore_nulls"):
+            return self._null_ignoring_minmax_sql(expression, "MIN")
+        return rename_func("MIN")(self, expression)
 
     def greatest_sql(self, expression: exp.Greatest) -> str:
-        if expression.expressions:
-            return rename_func("MAX")(self, expression)
-
-        return self.sql(expression, "this")
+        if not expression.expressions:
+            return self.sql(expression, "this")
+        if expression.args.get("ignore_nulls"):
+            return self._null_ignoring_minmax_sql(expression, "MAX")
+        return rename_func("MAX")(self, expression)
 
     def transaction_sql(self, expression: exp.Transaction) -> str:
         this = expression.this

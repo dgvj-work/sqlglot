@@ -124,19 +124,41 @@ class TestSQLite(Validator):
         self.validate_all(
             "SELECT LIKE('%y%', 'xyz', '')", write={"sqlite": "SELECT 'xyz' LIKE '%y%' ESCAPE ''"}
         )
+        # Native multi-arg MIN/MAX: NULL if any argument is NULL.
+        self.validate_identity("SELECT MIN(a, b) FROM t")
+        self.validate_identity("SELECT MAX(a, b) FROM t")
         self.validate_all(
             "SELECT MIN(a, b) FROM t",
             read={
-                "postgres": "SELECT LEAST(a, b) FROM t",
+                "bigquery": "SELECT LEAST(a, b) FROM t",
                 "sqlite": "SELECT MIN(a, b) FROM t",
             },
         )
         self.validate_all(
             "SELECT MAX(a, b) FROM t",
             read={
-                "postgres": "SELECT GREATEST(a, b) FROM t",
+                "bigquery": "SELECT GREATEST(a, b) FROM t",
                 "sqlite": "SELECT MAX(a, b) FROM t",
             },
+        )
+        # Postgres/DuckDB GREATEST/LEAST ignore NULLs; rewrite via COALESCE rotation.
+        self.validate_all(
+            "SELECT MIN(COALESCE(a, b), COALESCE(b, a)) FROM t",
+            read={
+                "postgres": "SELECT LEAST(a, b) FROM t",
+                "duckdb": "SELECT LEAST(a, b) FROM t",
+            },
+        )
+        self.validate_all(
+            "SELECT MAX(COALESCE(a, b), COALESCE(b, a)) FROM t",
+            read={
+                "postgres": "SELECT GREATEST(a, b) FROM t",
+                "duckdb": "SELECT GREATEST(a, b) FROM t",
+            },
+        )
+        self.validate_all(
+            "SELECT MAX(COALESCE(a, b, c), COALESCE(b, c, a), COALESCE(c, a, b)) FROM t",
+            read={"postgres": "SELECT GREATEST(a, b, c) FROM t"},
         )
         # CONCAT skips NULL args in these dialects, but || propagates it, so the
         # operands have to keep the COALESCE wrapping the other targets get.

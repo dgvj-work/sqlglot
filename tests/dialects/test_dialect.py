@@ -3626,6 +3626,13 @@ FROM subquery2""",
 
     def test_create_sequence(self):
         self.validate_identity("CREATE SEQUENCE seq")
+        # Leading NO* options must not be dropped / inverted (NO was previously
+        # consumed by the generic NO property parser and never retreated).
+        self.validate_identity("CREATE SEQUENCE seq NO CYCLE")
+        self.validate_identity("CREATE SEQUENCE seq NO MINVALUE")
+        self.validate_identity("CREATE SEQUENCE seq NO MAXVALUE")
+        self.validate_identity("CREATE SEQUENCE seq NO MINVALUE NO MAXVALUE")
+        self.validate_identity("CREATE SEQUENCE seq NO MINVALUE NO MAXVALUE NO CYCLE")
         self.validate_identity(
             "CREATE TEMPORARY SEQUENCE seq AS SMALLINT START WITH 3 INCREMENT BY 2 MINVALUE 1 MAXVALUE 10 CACHE 1 NO CYCLE OWNED BY table.col"
         )

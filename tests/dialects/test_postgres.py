@@ -1270,6 +1270,15 @@ FROM json_data, field_ids""",
         self.validate_identity("INSERT INTO x VALUES (1, 'a', 2.0) RETURNING a")
         self.validate_identity("INSERT INTO x VALUES (1, 'a', 2.0) RETURNING a, b")
         self.validate_identity("INSERT INTO x VALUES (1, 'a', 2.0) RETURNING *")
+        self.validate_identity("INSERT INTO x OVERRIDING SYSTEM VALUE VALUES (1)")
+        self.validate_identity("INSERT INTO x OVERRIDING USER VALUE VALUES (1)")
+        self.validate_identity("INSERT INTO x (a) OVERRIDING SYSTEM VALUE VALUES (DEFAULT)")
+        self.validate_identity("INSERT INTO x OVERRIDING SYSTEM VALUE DEFAULT VALUES")
+        self.validate_identity("INSERT INTO x OVERRIDING SYSTEM VALUE SELECT 1")
+        self.validate_identity(
+            "INSERT INTO x OVERRIDING SYSTEM VALUE VALUES (1) ON CONFLICT DO NOTHING"
+        )
+        self.validate_identity("INSERT INTO x OVERRIDING USER VALUE VALUES (1) RETURNING id")
         self.validate_identity("UPDATE tbl_name SET foo = 123 RETURNING a")
         self.validate_identity("CREATE TABLE cities_partdef PARTITION OF cities DEFAULT")
         self.validate_identity("CREATE TABLE t (c CHAR(2) UNIQUE NOT NULL) INHERITS (t1)")

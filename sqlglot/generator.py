@@ -1257,16 +1257,18 @@ class Generator:
         minvalue = f" MINVALUE {minvalue}" if minvalue else ""
         maxvalue = expression.args.get("maxvalue")
         maxvalue = f" MAXVALUE {maxvalue}" if maxvalue else ""
+        cache = expression.args.get("cache")
+        cache = f" CACHE {cache}" if cache is not None else ""
         cycle = expression.args.get("cycle")
         cycle_sql = ""
 
         if cycle is not None:
-            cycle_sql = f"{' NO' if not cycle else ''} CYCLE"
-            cycle_sql = cycle_sql.strip() if not start and not increment else cycle_sql
+            # Always include a leading space; strip() below handles option-only forms.
+            cycle_sql = f" {'NO ' if not cycle else ''}CYCLE"
 
         sequence_opts = ""
-        if start or increment or cycle_sql:
-            sequence_opts = f"{start}{increment}{minvalue}{maxvalue}{cycle_sql}"
+        if start or increment or minvalue or maxvalue or cache or cycle_sql:
+            sequence_opts = f"{start}{increment}{minvalue}{maxvalue}{cache}{cycle_sql}"
             sequence_opts = f" ({sequence_opts.strip()})"
 
         expr = self.sql(expression, "expression")

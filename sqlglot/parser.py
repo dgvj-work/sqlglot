@@ -7706,26 +7706,33 @@ class Parser:
         identity = self._match_text_seq("IDENTITY")
 
         if self._match(TokenType.L_PAREN):
-            if self._match_text_seq("START", "WITH"):
-                this.set("start", self._parse_bitwise())
-            if self._match_text_seq("INCREMENT", "BY"):
-                this.set("increment", self._parse_bitwise())
-            if self._match_text_seq("MINVALUE"):
-                this.set("minvalue", self._parse_bitwise())
-            if self._match_text_seq("MAXVALUE"):
-                this.set("maxvalue", self._parse_bitwise())
-
-            if self._match_text_seq("CYCLE"):
-                this.set("cycle", True)
-            elif self._match_text_seq("NO", "CYCLE"):
-                this.set("cycle", False)
-
             if not identity:
                 this.set("expression", self._parse_range())
-            elif not this.args.get("start") and self._match(TokenType.NUMBER, advance=False):
-                args = self._parse_csv(self._parse_bitwise)
-                this.set("start", seq_get(args, 0))
-                this.set("increment", seq_get(args, 1))
+            else:
+                # Postgres sequence options form an unordered bag; WITH/BY are optional.
+                while self._curr and not self._match(TokenType.R_PAREN, advance=False):
+                    if self._match_text_seq("START"):
+                        self._match_text_seq("WITH")
+                        this.set("start", self._parse_bitwise())
+                    elif self._match_text_seq("INCREMENT"):
+                        self._match_text_seq("BY")
+                        this.set("increment", self._parse_bitwise())
+                    elif self._match_text_seq("MINVALUE"):
+                        this.set("minvalue", self._parse_bitwise())
+                    elif self._match_text_seq("MAXVALUE"):
+                        this.set("maxvalue", self._parse_bitwise())
+                    elif self._match_text_seq("CACHE"):
+                        this.set("cache", self._parse_bitwise())
+                    elif self._match_text_seq("CYCLE"):
+                        this.set("cycle", True)
+                    elif self._match_text_seq("NO", "CYCLE"):
+                        this.set("cycle", False)
+                    elif self._match(TokenType.NUMBER, advance=False):
+                        args = self._parse_csv(self._parse_bitwise)
+                        this.set("start", seq_get(args, 0))
+                        this.set("increment", seq_get(args, 1))
+                    else:
+                        break
 
             self._match_r_paren()
 

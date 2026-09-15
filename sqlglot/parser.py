@@ -3676,6 +3676,11 @@ class Parser:
             elif self._match(TokenType.USING):
                 replace_using = self._parse_using_identifiers()
 
+        overriding = None
+        if self._match_text_seq("OVERRIDING") and self._match_texts(("SYSTEM", "USER")):
+            overriding = exp.var(self._prev.text.upper())
+            self._match_text_seq("VALUE")
+
         return self.expression(
             exp.Insert(
                 hint=hint,
@@ -3688,6 +3693,7 @@ class Parser:
                 using=replace_using,
                 partition=self._match(TokenType.PARTITION_BY) and self._parse_partitioned_by(),
                 settings=self._match_text_seq("SETTINGS") and self._parse_settings_property(),
+                overriding=overriding,
                 default=self._match_text_seq("DEFAULT", "VALUES"),
                 expression=set_values
                 or self._parse_derived_table_values()

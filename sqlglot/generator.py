@@ -2327,6 +2327,8 @@ class Generator:
         on_conflict = self.sql(expression, "conflict")
         on_conflict = f" {on_conflict}" if on_conflict else ""
         by_name = " BY NAME" if expression.args.get("by_name") else ""
+        overriding = self.sql(expression, "overriding")
+        overriding = f" OVERRIDING {overriding} VALUE" if overriding else ""
         default_values = "DEFAULT VALUES" if expression.args.get("default") else ""
         returning = self.sql(expression, "returning")
 
@@ -2343,7 +2345,7 @@ class Generator:
         source = self.sql(expression, "source")
         source = f"TABLE {source}" if source else ""
 
-        sql = f"INSERT{hint}{alternative}{ignore}{this}{stored}{by_name}{exists}{partition_by}{settings}{where}{using}{expression_sql}{source}"
+        sql = f"INSERT{hint}{alternative}{ignore}{this}{stored}{by_name}{exists}{partition_by}{settings}{where}{using}{overriding}{expression_sql}{source}"
         return self.prepend_ctes(expression, sql)
 
     def introducer_sql(self, expression: exp.Introducer) -> str:

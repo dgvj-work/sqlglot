@@ -2871,6 +2871,7 @@ class Parser:
 
     def _parse_property_before(self) -> exp.Expr | list[exp.Expr] | None:
         # only used for teradata currently
+        index = self._index
         self._match(TokenType.COMMA)
 
         kwargs = {
@@ -2895,21 +2896,34 @@ class Parser:
         if self._match_text_seq("CHARACTER", "SET"):
             return self._parse_character_set(default=bool(kwargs["default"]))
 
+        # Optional prefixes like NO must not stick if no property followed
+        # (e.g. CREATE SEQUENCE ... NO CYCLE).
+        self._retreat(index)
         return None
 
     def _parse_wrapped_properties(self) -> list[exp.Expr | list[exp.Expr]]:
         return self._parse_wrapped_csv(self._parse_property)
 
     def _parse_property(self) -> exp.Expr | list[exp.Expr] | None:
+        # Retreat when a PROPERTY_PARSERS handler declines so "NO CYCLE" etc. can
+        # fall through to _parse_sequence_properties instead of dropping "NO".
+        index = self._index
         if self._match_texts(self.PROPERTY_PARSERS):
-            return self.PROPERTY_PARSERS[self._prev.text.upper()](self)
+            prop = self.PROPERTY_PARSERS[self._prev.text.upper()](self)
+            if prop is not None:
+                return prop
+            self._retreat(index)
 
         if self._match_text_seq("CHARACTER", "SET"):
             return self._parse_character_set()
 
         if self._match(TokenType.DEFAULT):
+            default_index = self._index
             if self._match_texts(self.PROPERTY_PARSERS):
-                return self.PROPERTY_PARSERS[self._prev.text.upper()](self, default=True)
+                prop = self.PROPERTY_PARSERS[self._prev.text.upper()](self, default=True)
+                if prop is not None:
+                    return prop
+                self._retreat(default_index)
 
             if self._match_text_seq("CHARACTER", "SET"):
                 return self._parse_character_set(default=True)

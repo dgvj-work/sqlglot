@@ -3074,7 +3074,15 @@ class DuckDBGenerator(generator.Generator):
         if milli or nano:
             expression.set("sec", sec)
 
-        return rename_func("MAKE_TIMESTAMP")(self, expression)
+        # Pop zone so rename_func only passes args that MAKE_TIMESTAMP accepts
+        zone = expression.args.get("zone")
+        if zone:
+            zone = zone.pop()
+
+        timestamp = rename_func("MAKE_TIMESTAMP")(self, expression)
+        if zone:
+            return f"{timestamp} AT TIME ZONE {self.sql(zone)}"
+        return timestamp
 
     @unsupported_args("nano")
     def timestampltzfromparts_sql(self, expression: exp.TimestampLtzFromParts) -> str:

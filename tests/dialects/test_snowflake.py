@@ -1469,6 +1469,13 @@ class TestSnowflake(Validator):
             },
         )
         self.validate_all(
+            "SELECT TIMESTAMP_FROM_PARTS(2019, 1, 10, 2, 3, 4, 0, 'America/Los_Angeles')",
+            write={
+                "duckdb": "SELECT MAKE_TIMESTAMP(2019, 1, 10, 2, 3, 4 + (0 / 1000000000.0)) AT TIME ZONE 'America/Los_Angeles'",
+                "snowflake": "SELECT TIMESTAMP_FROM_PARTS(2019, 1, 10, 2, 3, 4, 0, 'America/Los_Angeles')",
+            },
+        )
+        self.validate_all(
             """WITH vartab(v) AS (select parse_json('[{"attr": [{"name": "banana"}]}]')) SELECT GET_PATH(v, '[0].attr[0].name') FROM vartab""",
             write={
                 "bigquery": """WITH vartab AS (SELECT PARSE_JSON('[{"attr": [{"name": "banana"}]}]') AS v) SELECT JSON_EXTRACT(v, '$[0].attr[0].name') FROM vartab""",

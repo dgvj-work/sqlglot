@@ -1286,6 +1286,19 @@ class TestOptimizer(unittest.TestCase):
     def test_pushdown_projection(self):
         self.check_file("pushdown_projections", pushdown_projections, schema=self.schema)
 
+    def test_simplify_not_complement_parentheses(self):
+        # Complementing a comparison must keep grouping so the SQL round-trips
+        # and does not rebind under = / - / || (issue #8421).
+        for sql, expected in (
+            ("SELECT c = NOT (a = b) FROM t", "SELECT c = (a <> b) FROM t"),
+            ("SELECT 1 - NOT (b = b) FROM t", "SELECT 1 - (b <> b) FROM t"),
+            ("SELECT 2 || NOT (b = 2) FROM t", "SELECT 2 || (b <> 2) FROM t"),
+        ):
+            with self.subTest(sql):
+                simplified = simplify(parse_one(sql)).sql()
+                self.assertEqual(simplified, expected)
+                self.assertEqual(parse_one(simplified).sql(), expected)
+
     def test_simplify(self):
         self.check_file("simplify", simplify, schema=self.schema)
 

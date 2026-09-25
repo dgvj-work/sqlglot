@@ -77,9 +77,12 @@ def _generated_to_auto_increment(expression: exp.Expr) -> exp.Expr:
         if not_null:
             t.cast(exp.ColumnConstraint, not_null.parent).pop()
 
-        expression.append(
-            "constraints", exp.ColumnConstraint(kind=exp.AutoIncrementColumnConstraint())
-        )
+        # SQLite only allows AUTOINCREMENT on INTEGER PRIMARY KEY. Without a PK,
+        # drop identity the same way bare AUTO_INCREMENT already is dropped.
+        if expression.find(exp.PrimaryKeyColumnConstraint):
+            expression.append(
+                "constraints", exp.ColumnConstraint(kind=exp.AutoIncrementColumnConstraint())
+            )
 
     return expression
 

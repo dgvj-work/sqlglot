@@ -241,7 +241,9 @@ def eliminate_qualify(expression: exp.Expr) -> exp.Expr:
                 if expression_by_alias:
                     for column in select_candidate.find_all(exp.Column):
                         expr = expression_by_alias.get(column.name)
-                        if expr:
+                        # Only rewrite unqualified aliases; table-qualified columns
+                        # refer to the source table, not a SELECT alias of the same name.
+                        if expr and not column.table:
                             column.replace(expr)
 
                 alias = find_new_name(expression.named_selects, "_w")
@@ -252,7 +254,12 @@ def eliminate_qualify(expression: exp.Expr) -> exp.Expr:
                     qualify_filters = column
                 else:
                     select_candidate.replace(column)
-            elif select_candidate.name not in expression.named_selects:
+            elif (
+                select_candidate.name not in expression.named_selects
+                and not select_candidate.find_ancestor(exp.Window)
+            ):
+                # Columns only referenced inside a QUALIFY window are already
+                # covered by moving that window into the subquery SELECT.
                 expression.select(select_candidate.copy(), copy=False)
 
         return outer_selects.from_(expression.subquery(alias="_t", copy=False), copy=False).where(

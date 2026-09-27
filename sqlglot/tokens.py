@@ -62,6 +62,10 @@ class _TokenizerBase:
     HEREDOC_TAG_IS_IDENTIFIER: t.ClassVar[bool]
     STRING_ESCAPES_ALLOWED_IN_RAW_STRINGS: t.ClassVar[bool]
     NESTED_COMMENTS: t.ClassVar[bool]
+    # Line-comment starters (e.g. `--`) that require whitespace/control/EOF after them
+    COMMENTS_REQUIRE_SPACE: t.ClassVar[set[str]]
+    # Characters that end a line comment (default: \\n and \\r)
+    LINE_COMMENT_ENDS: t.ClassVar[set[str]]
     TOKENS_PRECEDING_HINT: t.ClassVar[set[TokenType]]
     HEREDOC_STRING_ALTERNATIVE: t.ClassVar[TokenType]
     COMMENTS: t.ClassVar[list[str | tuple[str, str]]]
@@ -181,6 +185,12 @@ class Tokenizer(_TokenizerBase):
     STRING_ESCAPES_ALLOWED_IN_RAW_STRINGS = True
 
     NESTED_COMMENTS = True
+
+    # Dialects like MySQL require `--` to be followed by whitespace or a control char
+    COMMENTS_REQUIRE_SPACE: t.ClassVar[set[str]] = set()
+
+    # Most dialects end line comments at either \\n or \\r; MySQL only ends at \\n
+    LINE_COMMENT_ENDS: t.ClassVar[set[str]] = {"\n", "\r"}
 
     HINT_START = "/*+"
 
@@ -556,6 +566,8 @@ class Tokenizer(_TokenizerBase):
             commands=self.COMMANDS,
             command_prefix_tokens=self.COMMAND_PREFIX_TOKENS,
             nested_comments=self.NESTED_COMMENTS,
+            comments_require_space=self.COMMENTS_REQUIRE_SPACE,
+            line_comment_ends=self.LINE_COMMENT_ENDS,
             hint_start=self.HINT_START,
             tokens_preceding_hint=self.TOKENS_PRECEDING_HINT,
             has_bit_strings=bool(self.BIT_STRINGS),

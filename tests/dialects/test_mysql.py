@@ -1990,3 +1990,15 @@ COMMENT='客户账户表'"""
             exp.AutoIncrementProperty
         )
         self.assertEqual(prop.this.to_py(), 3000000000)
+
+    def test_dash_comments(self):
+        # MySQL: `--` starts a comment only when followed by whitespace/control/EOF.
+        # https://dev.mysql.com/doc/refman/8.4/en/ansi-diff-comments.html
+        self.validate_identity("SELECT 1--1", "SELECT 1 - -1")
+        self.validate_identity("SELECT 1-- 1", "SELECT 1 /* 1 */")
+        self.validate_identity("SELECT 1 -- 1", "SELECT 1 /* 1 */")
+        # Line comments run to \n only, so \r does not end them.
+        self.validate_identity("SELECT 1 -- x\r+1", "SELECT 1 /* x\r+1 */")
+        # # comments do not require whitespace
+        self.validate_identity("SELECT 1#1", "SELECT 1 /* 1 */")
+        self.validate_identity("SELECT balance--1", "SELECT balance - -1")

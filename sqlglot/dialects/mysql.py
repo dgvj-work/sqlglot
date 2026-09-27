@@ -78,6 +78,10 @@ class MySQL(Dialect):
         ESCAPE_FOLLOW_CHARS = ["0", "b", "n", "r", "t", "Z", "%", "_"]
 
         NESTED_COMMENTS = False
+        # https://dev.mysql.com/doc/refman/8.4/en/ansi-diff-comments.html
+        COMMENTS_REQUIRE_SPACE = {"--"}
+        # MySQL line comments run to \\n only (not \\r)
+        LINE_COMMENT_ENDS = {"\n"}
 
         KEYWORDS = {
             **tokens.Tokenizer.KEYWORDS,

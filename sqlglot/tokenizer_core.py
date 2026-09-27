@@ -560,6 +560,8 @@ class TokenizerCore:
         "commands",
         "command_prefix_tokens",
         "nested_comments",
+        "comments_require_space",
+        "line_comment_ends",
         "hint_start",
         "tokens_preceding_hint",
         "has_bit_strings",
@@ -591,6 +593,8 @@ class TokenizerCore:
         commands: set[TokenType],
         command_prefix_tokens: set[TokenType],
         nested_comments: bool,
+        comments_require_space: set[str],
+        line_comment_ends: set[str],
         hint_start: str,
         tokens_preceding_hint: set[TokenType],
         has_bit_strings: bool,
@@ -619,6 +623,8 @@ class TokenizerCore:
         self.commands = commands
         self.command_prefix_tokens = command_prefix_tokens
         self.nested_comments = nested_comments
+        self.comments_require_space = comments_require_space
+        self.line_comment_ends = line_comment_ends
         self.hint_start = hint_start
         self.tokens_preceding_hint = tokens_preceding_hint
         self.has_bit_strings = has_bit_strings
@@ -847,10 +853,13 @@ class TokenizerCore:
                 return
             if self._scan_comment(word):
                 return
-            if prev_space or single_token or not char:
+            # Comment starters live in the keyword trie but not KEYWORDS. When a
+            # dialect rejects a comment match (e.g. MySQL `1--1`), fall through
+            # so leading single-token characters like `-` can be tokenized.
+            keyword = word.upper()
+            if keyword in self.keywords and (prev_space or single_token or not char):
                 self._advance(size - 1)
-                word = word.upper()
-                self._add(self.keywords[word], text=word)
+                self._add(self.keywords[keyword], text=keyword)
                 return
 
         if self._char in single_tokens:
@@ -866,6 +875,16 @@ class TokenizerCore:
         comment_start_line = self._line
         comment_start_size = len(comment_start)
         comment_end = self.comments[comment_start]
+
+        # MySQL: `--` starts a comment only when followed by whitespace, a
+        # control character, or EOF. See https://dev.mysql.com/doc/refman/8.4/en/ansi-diff-comments.html
+        if comment_start in self.comments_require_space:
+            after_idx = self._current - 1 + comment_start_size
+            if after_idx < self.size:
+                after = self.sql[after_idx]
+                code = ord(after)
+                if not (after.isspace() or code < 32 or code == 127):
+                    return False
 
         if comment_end:
             # Skip the comment's start delimiter
@@ -895,12 +914,12 @@ class TokenizerCore:
             self._comments.append(self._text[comment_start_size : -comment_end_size + 1])
             self._advance(comment_end_size - 1)
         else:
+            line_comment_ends = self.line_comment_ends
             _peek = self._peek
-            while not self._end and _peek != "\n" and _peek != "\r":
+            while not self._end and _peek not in line_comment_ends:
                 self._advance(alnum=True)
                 _peek = self._peek
             self._comments.append(self._text[comment_start_size:])
-
         if (
             comment_start == self.hint_start
             and self.tokens

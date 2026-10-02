@@ -95,6 +95,7 @@ class Postgres(Dialect):
         KEYWORDS = {
             **tokens.Tokenizer.KEYWORDS,
             "~": TokenType.RLIKE,
+            "^@": TokenType.CARET_AT,
             "@@": TokenType.DAT,
             "@?": TokenType.AT_QMARK,
             "@>": TokenType.AT_GT,

@@ -161,6 +161,8 @@ class Snowflake(Dialect):
             "POOL": TokenType.POOL,
             "PUT": TokenType.PUT,
             "UNDROP": TokenType.UNDROP,
+            "LIST": TokenType.COMMAND,
+            "LS": TokenType.COMMAND,
             "REMOVE": TokenType.COMMAND,
             "RM": TokenType.COMMAND,
             "ROLE": TokenType.ROLE,

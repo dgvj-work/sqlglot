@@ -712,6 +712,16 @@ class TestSnowflake(Validator):
         self.validate_identity("ALTER TABLE authors ADD CONSTRAINT c1 UNIQUE (id, email)")
         self.validate_identity("RM @parquet_stage", check_command_warning=True)
         self.validate_identity("REMOVE @parquet_stage", check_command_warning=True)
+        self.validate_identity("LIST @%table1", check_command_warning=True)
+        self.validate_identity("LIST @db1.schema1.%table1", check_command_warning=True)
+        self.validate_identity("LIST @named_stage", check_command_warning=True)
+        self.validate_identity("LIST @mystage/path1", check_command_warning=True)
+        self.validate_identity("LIST @~", check_command_warning=True)
+        self.validate_identity(
+            "LIST @mystage/path1 PATTERN = '.*\\.csv'",
+            check_command_warning=True,
+        )
+        self.validate_identity("LS @named_stage", check_command_warning=True)
         self.validate_identity("SELECT TIMESTAMP_FROM_PARTS(2024, 5, 9, 14, 30, 45)")
         self.validate_identity("SELECT TIMESTAMP_FROM_PARTS(2024, 5, 9, 14, 30, 45, 123)")
         self.validate_identity("SELECT TIMESTAMP_LTZ_FROM_PARTS(2013, 4, 5, 12, 00, 00)")

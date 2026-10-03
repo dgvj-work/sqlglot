@@ -117,6 +117,7 @@ class GeneratedAsIdentityColumnConstraint(Expression, ColumnConstraintKind):
         "maxvalue": False,
         "cycle": False,
         "order": False,
+        "cache": False,
     }
 
 

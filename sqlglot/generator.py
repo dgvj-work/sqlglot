@@ -1332,9 +1332,19 @@ class Generator:
         increment = expression.args.get("increment")
         increment = f" INCREMENT BY {increment}" if increment else ""
         minvalue = expression.args.get("minvalue")
-        minvalue = f" MINVALUE {minvalue}" if minvalue else ""
+        if minvalue is False:
+            minvalue = " NO MINVALUE"
+        elif minvalue:
+            minvalue = f" MINVALUE {minvalue}"
+        else:
+            minvalue = ""
         maxvalue = expression.args.get("maxvalue")
-        maxvalue = f" MAXVALUE {maxvalue}" if maxvalue else ""
+        if maxvalue is False:
+            maxvalue = " NO MAXVALUE"
+        elif maxvalue:
+            maxvalue = f" MAXVALUE {maxvalue}"
+        else:
+            maxvalue = ""
         cache = expression.args.get("cache")
         cache = f" CACHE {cache}" if cache is not None else ""
         cycle = expression.args.get("cycle")

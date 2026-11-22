@@ -2065,6 +2065,9 @@ FROM json_data, field_ids""",
         self.validate_identity(
             "CREATE TABLE t (a INT GENERATED ALWAYS AS IDENTITY (MINVALUE 1 MAXVALUE 100))"
         )
+        self.validate_identity(
+            "CREATE TABLE t (a INT GENERATED ALWAYS AS IDENTITY (NO MINVALUE NO MAXVALUE))"
+        )
         self.validate_identity("CREATE TABLE t (a INT GENERATED ALWAYS AS IDENTITY (CACHE 10))")
         self.validate_identity(
             "CREATE TABLE t (a INT GENERATED ALWAYS AS IDENTITY (CACHE 10 NO CYCLE))"

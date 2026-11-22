@@ -8149,6 +8149,12 @@ class Parser:
                     elif self._match_text_seq("INCREMENT"):
                         self._match_text_seq("BY")
                         this.set("increment", self._parse_bitwise())
+                    elif self._match_text_seq("NO", "MINVALUE"):
+                        this.set("minvalue", False)
+                    elif self._match_text_seq("NO", "MAXVALUE"):
+                        this.set("maxvalue", False)
+                    elif self._match_text_seq("NO", "CYCLE"):
+                        this.set("cycle", False)
                     elif self._match_text_seq("MINVALUE"):
                         this.set("minvalue", self._parse_bitwise())
                     elif self._match_text_seq("MAXVALUE"):
@@ -8157,8 +8163,6 @@ class Parser:
                         this.set("cache", self._parse_bitwise())
                     elif self._match_text_seq("CYCLE"):
                         this.set("cycle", True)
-                    elif self._match_text_seq("NO", "CYCLE"):
-                        this.set("cycle", False)
                     elif self._match(TokenType.NUMBER, advance=False):
                         args = self._parse_csv(self._parse_bitwise)
                         this.set("start", seq_get(args, 0))
